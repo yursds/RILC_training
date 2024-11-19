@@ -36,13 +36,18 @@ Further information can be found in the respective folders.
 
 2. Build and Run Docker Image
 
+    Enter to `.dockercontainer`:
+    ```bash
+    cd .dockercontainer 
+    ```
+   
     To build image `RILC_training`:
     ```bash
-    ./.dockercontainer/build.bash
+    ./build.bash
     ```
     To run image `RILC_training`:
     ```bash
-    ./.dockercontainer/run.bash
+    ./run.bash
     ```
 
     - Run the following command <ins>**only the first time after cloning**</ins> to resolve [bug](https://github.com/Farama-Foundation/Gymnasium/pull/746) and create the `leg_constrained.urdf` file for correct loading of robot:

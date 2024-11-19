@@ -1,0 +1,46 @@
+# PConfiguration Gymnasium environment for softleg
+
+default : &default
+
+  env_id     : 'Env_RILC' # environment name
+
+  taskT      : 1.0     # task duration [s]
+  stayT      : 0.0
+  f_robot    : 500     # robot update frequency [Hz]
+  scaling    : 10      # scaling factor of frequency (f_policy w.r.t. f_robot)
+  n_ep_reset : 5       # number of episode to use in a single policy update
+  n_envs     : 16      # number of environment
+  n_update   : 200     # number of policy update
+  le         : 0.2
+  lde        : 0.4
+  ldde       : 0.0
+  kp         : 0.4
+  kv         : 0.25
+  chunks     : 8
+  fl_noILC   : False
+  seed       : 42
+  pi         : [64,64]
+  vf         : [64,64]
+
+multi_task : &multi_task
+  <<: *default
+
+  env_id   : 'Env_RILC' # environment name
+  
+  n_ep_reset : 5       # number of episode to use in a single policy update
+
+  f_robot  : 100     # robot update frequency [Hz]
+  scaling  : 2      # scaling factor of frequency (f_policy w.r.t. f_robot)
+
+  n_envs   : 64      # number of environment
+
+  chunks   : 16
+  info     : 'multi task'
+
+
+classic_rl :
+  <<: *multi_task
+
+  env_id   : 'Env_classic_RL' # environment name
+  info     : 'multi task'
+

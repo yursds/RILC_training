@@ -1,0 +1,55 @@
+<mujoco model="leg_constrained">
+  <compiler angle="radian" meshdir="../meshes/"/>
+  <asset>
+    <mesh name="cart" file="cart.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="Module_left_hind" file="Module_left_hind.stl"/>
+    <mesh name="Lower_leg_left" file="Lower_leg_left.stl"/>
+  </asset>
+  <worldbody>
+    <body name="base_link">
+      <inertial pos="0 0 0" mass="0.0001" diaginertia="1e-05 1e-05 1e-05"/>
+      <geom quat="3.26795e-07 0 0 -1" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="cart"/>
+      <body name="LH_SHOULDER" pos="0.025 0.05 0.5" quat="2.31079e-07 -0.707107 0.707107 2.31079e-07">
+        <inertial pos="-0.0724874 0.0315826 0.00248124" quat="0.546772 0.454856 0.541001 0.448848" mass="0.476697" diaginertia="0.00306152 0.00305004 0.000215348"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="Module_left_hind"/>
+        <geom size="0.1345 0.0285 0.03" pos="-0.0945 0 0" type="box" rgba="1 1 1 1"/>
+        <body name="LH_UPPER_LEG" pos="-0.19 0.044 0" quat="0.707107 0 0.707107 0">
+          <inertial pos="-0.0724874 0.0315826 0.00248124" quat="0.546772 0.454856 0.541001 0.448848" mass="0.476697" diaginertia="0.00306152 0.00305004 0.000215348"/>
+          <!-- add armature="0.1" damping="0.1" frictionloss="1.0", armature is necessary to link directly 2 joints/> -->
+          <joint name="LH_HFE" pos="0 0 0" axis="0 1 0" actuatorfrcrange="-6 6" range="-5. 5." armature="0.0" damping="0.001" frictionloss="0.001"/>
+          <!-- add elastic joint, remove range of parent joint, only the child range is important -->
+          <!-- <joint name="LH_HFE_el" pos="0 0 0" axis="0 1 0" range="-3.14159 3.14159" armature="0.01" stiffness="50." damping="0.01" springref="0" frictionloss="0.001"/> -->
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="Module_left_hind"/>
+          <geom size="0.1345 0.0285 0.03" pos="-0.0945 0.015 0" type="box" rgba="1 1 1 1"/>
+          <body name="LH_LOWER_LEG" pos="-0.19 0.044 0">
+            <inertial pos="-0.0660893 0.0198901 1.55259e-05" quat="0.487419 0.486067 0.513613 0.512215" mass="0.046942" diaginertia="0.000213 0.000211548 4.57013e-06"/>
+            <!-- add armature="0.1" damping="0.1" frictionloss="1.0", armature is necessary to link directly 2 joints/> -->
+            <joint name="LH_KFE" pos="0 0 0" axis="0 1 0" actuatorfrcrange="-6 6" range="-5. 5." armature="0.0" damping="0.001" frictionloss="0.001"/>
+            <!-- add elastic joint, remove range of parent joint, only the child range is important -->
+            <!-- <joint name="LH_KFE_el" pos="0 0 0" axis="0 1 0" range="-3.14159 3.14159" stiffness="50." damping="0.01" springref="0" frictionloss="0.001"/> -->
+            <geom quat="0.707107 0 0.707107 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="Lower_leg_left"/>
+            <geom name="LH_LOWER_LEG" quat="0.707107 0 0.707107 0" type="mesh" rgba="1 1 1 1" mesh="Lower_leg_left"/>
+            <body name="LH_FOOT" pos="-0.19 0.028 0"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="HIP"     joint="LH_HFE" ctrlrange="-5. 5." gear="0.2"/>
+    <motor name="KNEE"     joint="LH_KFE" ctrlrange="-5. 5." gear="0.02"/>
+
+    <!-- <damper name="damper0"    joint="LH_HFE" kv="0.1" ctrlrange="0. 10." /> -->
+    <!-- <position name="pos0"  joint="LH_HFE" kp="2" dampratio="1" ctrlrange="-5. 5." /> -->
+    <!-- <position name="pos1"  joint="LH_KFE" kp="2" dampratio="1" ctrlrange="-5. 5." /> -->
+    <!-- <motor ctrllimited="true" ctrlrange="-5 5" forcelimited="true" forcerange="-5 5" joint="LH_HFE" name="LH_HFE"/> -->
+    </actuator>
+  
+  <sensor>
+    <jointpos name="q_hip" joint="LH_HFE"/>
+    <jointpos name="q_knee" joint="LH_KFE"/>
+    <jointvel name="dq_hip" joint="LH_HFE"/>
+    <jointvel name="dq_knee" joint="LH_KFE"/>
+  </sensor>
+  
+</mujoco>

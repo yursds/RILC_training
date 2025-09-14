@@ -1,0 +1,6 @@
+__pycache__
+*.urdf
+
+# New Logs and Model
+model/
+log/

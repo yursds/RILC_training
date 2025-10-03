@@ -3,7 +3,6 @@ import torch
 from classes.references.ABC_reference   import *
 from classes.robots.builder_manipulator import ManURDF
 
-from matplotlib                 import pyplot       as plt
 from torch.nn                   import functional   as F
 
 
@@ -108,6 +107,8 @@ class MinJerkRef(JointRef_ABC):
         return self.jointRef          
     
     def plotRef(self, plot_now=False):
+        
+        import matplotlib.pyplot as plt
         
         joint_tensor = self._refTensor
         dim = joint_tensor.size(2)
@@ -230,10 +231,9 @@ class InvKin(ABC):
         self.eps        = 1e-5
         self.it_MAX     = 1000
         
-        # swing phase
-        self._computeInvKin()
+        # self.computeInvKin()
     
-    def _clik(self, q:torch.Tensor, dt = 0.01, kp=1.0) -> list[torch.Tensor,torch.Tensor]:
+    def _clik(self, q:torch.Tensor, dt = 0.01, kp=1.0, impl='euler') -> list[torch.Tensor,torch.Tensor]:
 
         pos_cur = self.__robot.getForwKinEE(q)[0]
         
@@ -241,17 +241,22 @@ class InvKin(ABC):
         tmp_v   = 0 + kp*err
         
         # RK4 integration
-        k1v = torch.matmul(self.__robot.getPinvJacPosEE(q=q), tmp_v)
-        k2v = torch.matmul(self.__robot.getPinvJacPosEE(q=q + k1v * dt / 2), tmp_v)
-        k3v = torch.matmul(self.__robot.getPinvJacPosEE(q=q + k2v * dt / 2), tmp_v)
-        k4v = torch.matmul(self.__robot.getPinvJacPosEE(q=q + k3v * dt), tmp_v)
-        new_dq = (k1v + 2 * (k2v + k3v) + k4v) / 6
+        if impl == 'RK4':
+            k1v = torch.matmul(self.__robot.getPinvJacPosEE(q=q), tmp_v)
+            k2v = torch.matmul(self.__robot.getPinvJacPosEE(q=q + k1v * dt / 2), tmp_v)
+            k3v = torch.matmul(self.__robot.getPinvJacPosEE(q=q + k2v * dt / 2), tmp_v)
+            k4v = torch.matmul(self.__robot.getPinvJacPosEE(q=q + k3v * dt), tmp_v)
+            new_dq = (k1v + 2 * (k2v + k3v) + k4v) / 6
+        elif impl == 'euler':
+            new_dq   = torch.matmul(self.__robot.getPinvJacPosEE(q=q), tmp_v)
+        else:
+            raise ValueError("Integration method not recognized.")
         
         new_q   = q + dt * new_dq
         
         return new_q, torch.sqrt((err**2).mean())
  
-    def _computeInvKin(self, dt = 0.01, kp=1.0) -> None:
+    def computeInvKin(self, dt = 0.01, kp=1.0) -> None:
         
         q   = self.qi
         eps = self.eps
@@ -260,7 +265,7 @@ class InvKin(ABC):
         for _ in range(iter_max):
             
             q, err = self._clik(q=q, dt=dt, kp=kp)
-            if err <= eps:        
+            if err <= eps:    
                 break
             
         self.qf = q

@@ -8,40 +8,26 @@ import mujoco
 from classes.controllers.ilc        import ILC_base
 from classes.controllers.pd         import PD_base
 from classes.robots.manipulator_RR  import Sim_RR
+from classes.references.classic_ref import RefInvKin as GenRef
 
 from gymnasium.envs.mujoco.mujoco_rendering import MujocoRenderer
 from classes.environments.env_rlilc_mjc import Env_RILC as ENV
-import functools
-
-
 
 abs_path  = os.path.join(os.path.dirname((os.path.abspath(__file__))),'classes') # classes_folder
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
 
 parent_str = "model"
-dat_str = "rilc_64" # "rilc" "rl_classic"
+dat_str = "rilc" # "rilc" "rl_classic"
 step_str = "best_model/best_model.zip"
 
 print(dat_str)
+
 model_str = parent_str + "/" + dat_str + "/" + step_str
 
-QF = torch.tensor([[torch.pi/4], [torch.pi/3]])
-QF = torch.tensor([[-2.232461929321289], [-3.069495677947998]])
-FL_ILC = True
-FL_RL = True
-OBS_ILC = False
+def custom_lissajous_at(idx, complete_traj: torch.Tensor) -> list[torch.Tensor, torch.Tensor, torch.Tensor]:
 
-if FL_ILC: OBS_ILC = True
-TRAJ = "minjerk" # "minjerk" "lissajous"
-
-
-def custom_lissajous_at(t:float, complete_traj: torch.Tensor, dt:float) -> list[torch.Tensor, torch.Tensor, torch.Tensor]:
-
-    idx = int(t // dt)
-    if idx >= complete_traj.shape[1]:
-        idx = complete_traj.shape[1] - 1
-        print("Warning: index out of bounds in custom_lissajous_at")    
+    # idx = int(t // dt)
     des_traj = complete_traj[:, idx]
 
     q_des   = des_traj[0:2].view(2,1)
@@ -56,6 +42,10 @@ def load_trajectory(filename: str = 'complete_traj.pt') -> torch.Tensor:
         complete_traj = torch.load(filename, weights_only=True)
         # print(f"Trajectory loaded from {filename}")
     return complete_traj
+
+
+TRAJ_LISS = load_trajectory(filename=os.path.join(abs_path, "references", "traj_liss_.pt"))
+
 
 def minjerk(qi:torch.Tensor,qf:torch.Tensor,duration:float,t:float) -> list[torch.Tensor,torch.Tensor,torch.Tensor]:
 
@@ -90,12 +80,10 @@ def resample_u(u_old:torch.Tensor, u_new:torch.Tensor, num_step:int) -> torch.Te
     return du_step
 
 
-
 if __name__ == '__main__':
 
     visual = True
     
-    # ++++++++++++++++++++++++  init  +++++++++++++++++++++++++++++++++++ 
     yaml_str        = parent_str+ "/" +dat_str+ "/" +'config.yaml'
     config:dict     = load_config(yaml_str)
     taskT: float    = config['taskT']
@@ -107,19 +95,16 @@ if __name__ == '__main__':
     ldde: float     = config['ldde']
     kp: float       = config['kp']
     kv: float       = config['kv']
+    fl_noILC: bool  = config['fl_noILC']
     env_id: str     = config['env_id']
     
-    model = mujoco.MjModel.from_xml_path(MJC_PATH)
+    model = mujoco.MjModel.from_xml_path(MJC_PATH)    
     __actual_dt = model.opt.timestep
     frame_skip  = int((1/f_robot)/__actual_dt)
-    
+
     noise_q_dev  = 1e-6
     noise_dq_dev = 2.5e-4
     njoint = 2
-    # kp = .0
-    # kv = .2
-    # le = 0.08
-    # lde = 0.04
     
     # init_observation
     f_policy       = int(f_robot / scaling)
@@ -134,42 +119,18 @@ if __name__ == '__main__':
         ldde=ldde, 
         kp=kp, 
         kv=kv, 
+        fl_noILC=fl_noILC, 
         n_ep_reset=n_ep_reset)
     
-    # ++++++++++++++++ init env vars ++++++++++++++++++++++++++++++++++++
-    
-    dt_pol = 1/f_policy
-    dt_rob = 1/f_robot
-    uRL_old_ep_ts  = torch.zeros(njoint,1,samples)
-    uILC_old_ep_ts = torch.zeros(njoint,1,samples)
-    uFB_old_ep_ts = torch.zeros(njoint,1,samples)
-    e_old_ep_ts = torch.zeros(njoint,1,samples)
-    de_old_ep_ts = torch.zeros(njoint,1,samples)
-    
-    # +++++++++++++++++ init traj ++++++++++++++++++++++++++++
-    
-    if TRAJ == "minjerk":
-        des_traj_at = functools.partial(minjerk, qi = torch.tensor([[0.0], [0.0]]), qf = QF, duration = taskT)
-    elif TRAJ == "lissajous":
-        traj = load_trajectory(filename=os.path.join(abs_path, "references", "traj.pt"))
-        des_traj_at = functools.partial(custom_lissajous_at, complete_traj=traj, dt=dt_rob)
-    elif TRAJ == "circle":
-        traj = load_trajectory(filename=os.path.join(abs_path, "references", "traj_circle.pt"))
-        des_traj_at = functools.partial(custom_lissajous_at, complete_traj=traj, dt=dt_rob)
-    else:
-        assert False, "No valid trajectory selected"
-        
     # +++++++++++++++++++ load pin ++++++++++++++++++++++++++++
     
     robot = Sim_RR(urdf_path=URDF_PATH, ee_name='LH_ANKLE')
-    tmp_q = des_traj_at(t=0.0)[0].clone()
-    tmp_dq = des_traj_at(t=0.0)[1].clone()
-    robot.setState(q0=tmp_q, dq0=tmp_dq, q=tmp_q, dq=tmp_dq)
+    robot.setState(q0=torch.zeros(2,1), dq0=torch.zeros(2,1))
     robot.u0 = robot.getGravity(robot.q0).clone()
     qi = robot.q0.clone()
     dqi = robot.dq0.clone()
-    qpos_init = robot.q0.flatten().numpy().copy()
     qvel_init = robot.dq0.flatten().numpy().copy()
+    qpos_init = robot.q0.flatten().numpy().copy()
     
     # +++++++++++++++++ load ctrl ++++++++++++++++++++++++++++
     
@@ -186,10 +147,21 @@ if __name__ == '__main__':
     conILC.newEp()
     
     PD = PD_base(
-        dimU    = robot._dim_u,
-        kp      = kp,
-        kv      = kv,
-    )
+            dimU    = robot._dim_u,
+            kp      = kp,
+            kv      = kv,
+        )
+    
+    # ++++++++++++++++ init env vars ++++++++++++++++++++++++++++++++++++
+    
+    dt_pol = 1/f_policy
+    dt_rob = 1/f_robot
+    uRL_old_ep_ts  = torch.zeros(njoint,1,samples)
+    uILC_old_ep_ts = torch.zeros(njoint,1,samples)
+    uFB_old_ep_ts = torch.zeros(njoint,1,samples)
+    e_old_ep_ts = torch.zeros(njoint,1,samples)
+    de_old_ep_ts = torch.zeros(njoint,1,samples)
+    
     
     # ++++++++++++++++++ load policy ++++++++++++++++++++++++++++
     
@@ -197,23 +169,31 @@ if __name__ == '__main__':
     
     # ++++++++++++++++++++++ reset ++++++++++++++++++++++++++++++++++++++++++
     
-    # model.dof_frictionloss = model.dof_frictionloss*(1.2)
-    # model.dof_armature     = model.dof_armature*(1.2)
-    # model.body_mass        = model.body_mass*(1.2)
-    # model.body_ipos        = model.body_ipos*(1.2)
+    model.dof_frictionloss = model.dof_frictionloss*(1.2)
     data = mujoco.MjData(model)
-    mujoco.mj_resetData(model, data)
-
     # qpos_init = data.qpos # !!!!
     # qvel_init = data.qvel 
     data.qpos = qpos_init
     data.qvel = qvel_init
-    mujoco.mj_inverse(model, data)
-    joint_forces = torch.from_numpy(data.qfrc_inverse).clone()
-    data.ctrl[:] = joint_forces #robot.getGravity(q=qi).flatten()
+    uMB = robot.getGravity(q=qi).clone()
+    data.ctrl[:] = uMB.flatten()
+
     mujoco.mj_forward(model, data)
     
     conILC.resetAll()
+    
+    qf = torch.tensor([[-torch.pi/2, -torch.pi/2]]).T
+    #qf = torch.tensor([[torch.pi/6, -torch.pi/6]]).T
+
+    ref_gen = GenRef(
+        robot    = robot,
+        duration = taskT,
+        pf       = qf,
+        stayT    = 0.0,
+        dt       = dt_pol,
+        )
+    ref_env      = ref_gen.getRef()
+    
     
     # ++++++++++++ renderer +++++++++++++++++++++++++++++
     mujoco_renderer = MujocoRenderer(model, data, None, 800, 600)
@@ -225,7 +205,7 @@ if __name__ == '__main__':
     dq_old  = dq.clone()
     
     d = torch.rand(2,samples,n_ep_reset)*0.5*0
-        
+    
     e_list   = []
     de_list  = []
     dde_list = []
@@ -242,13 +222,13 @@ if __name__ == '__main__':
     ddr_list = torch.zeros(2,samples)
 
     for i in range(samples):
-        t = i*dt_pol
-        r, dr, ddr = des_traj_at(t=t)
+        
+        r, dr, ddr = minjerk(qi = qi, qf = qf, duration = taskT, t = i*dt_pol)
 
         r_list[:,i] = r.flatten()
         dr_list[:,i] = dr.flatten()
         ddr_list[:,i] = ddr.flatten()
-    
+
     for ep in range(n_ep_reset):
         
         t = 0.0
@@ -269,9 +249,6 @@ if __name__ == '__main__':
         mujoco.mj_resetData(model, data)
         data.qpos = qpos_init
         data.qvel = qvel_init
-        mujoco.mj_inverse(model, data)
-        joint_forces = torch.from_numpy(data.qfrc_inverse).clone()
-        data.ctrl[:] = robot.getGravity(q=qi).flatten()
         mujoco.mj_forward(model, data)
         dq_old = torch.as_tensor(data.qvel).view(2,1).clone()
         
@@ -287,13 +264,14 @@ if __name__ == '__main__':
         uFB_tmp     = []
         
         for i in range(samples):
-            # r_, dr_, ddr_ = minjerk(qi = qi, qf = qf, duration = taskT, t = t)
-            r_, dr_, ddr_ = des_traj_at(t=t)
+            
+            r_, dr_, ddr_ = minjerk(qi = qi, qf = qf, duration = taskT, t = t)
             
             q[0]   = torch.from_numpy(data.sensor("q_hip").data)
             q[1]   = torch.from_numpy(data.sensor("q_knee").data)
             dq[0]  = torch.from_numpy(data.sensor("dq_hip").data)
             dq[1]  = torch.from_numpy(data.sensor("dq_knee").data)
+            
             q    += noise_q_dev * torch.randn(2,1)
             dq   += noise_dq_dev * torch.randn(2,1)
             ddq   = (dq-dq_old)*f_robot
@@ -307,65 +285,58 @@ if __name__ == '__main__':
             de_   = dr_ - dq
             dde_  = ddr_ - ddq
             
-            e_tmp.append(e_.flatten().clone())
-            de_tmp.append(de_.flatten().clone())
-            dde_tmp.append(dde_.flatten().clone())
-            
             q_old = robot.q.clone()
             robot.setState(q=q, dq=dq)
             
             # Update useful memory of ILC
-            # iM       = robot.getInvMass(q=q_old)
-            # u_delta  = torch.matmul(iM, uFB+uILC)
-            u_delta = uFB+uILC
+            iM       = robot.getInvMass(q=q_old)
+            u_delta  = torch.matmul(iM, uFB+uILC)
             # update ERROR memory of ILC
             conILC.updateMemError(e_=e_,de_=de_,dde_=dde_)
             # update INPUT memory of ILC
             conILC.updateMemInput(u_delta)
             
             # get new control of ILC
-            if conILC.episodes != 0 and FL_ILC:
+            if conILC.episodes != 0:
+                M    = robot.getMass(q=q)
                 uilc = conILC.getControl()
-                # M    = robot.getMass(q=q)
-                # uILC = torch.matmul(M,uilc)
-                uILC = uilc
+                uILC = torch.matmul(M,uilc)
             else:
                 uILC = torch.zeros(2,1)
             
-            duRL  = resample_u(u_old=uRL_old, u_new=uRL, num_step=scaling)
-            duILC = resample_u(u_old=uILC_old, u_new=uILC,  num_step=scaling)
+            duRL  = env.resample_u(u_old=uRL_old, u_new=uRL, num_step=scaling)
+            duILC = env.resample_u(u_old=uILC_old, u_new=uILC,  num_step=scaling)
             uRL_interp  = uRL_old
             uILC_interp = uILC_old
             
             t_pol = t + dt_pol
             
             if t_pol <= taskT:
-                # r_f, dr_f, ddr_f = minjerk(qi = qi, qf = qf, duration = taskT, t = t_pol)
-                r_f, dr_f, ddr_f = des_traj_at(t=t_pol)
-
+                r_f, dr_f, ddr_f = minjerk(qi = qi, qf = qf, duration = taskT, t = t_pol)
+                
                 uRL_old_ep  = uRL_old_ep_ts[:,:,i]
                 uILC_old_ep = uILC_old_ep_ts[:,:,i]
                 uFB_old_ep = uFB_old_ep_ts[:,:,i]
                 e_old_ep = e_old_ep_ts[:,:,i]
                 de_old_ep = de_old_ep_ts[:,:,i]
                 
-                if OBS_ILC:
-                    obs  = torch.cat([
-                        q.flatten(), dq.flatten(), \
-                        r_f.flatten(), dr_f.flatten(), \
-                        uRL_old.flatten(), uILC.flatten(), uILC_old_ep.flatten(),
-                        e_old_ep.flatten(), de_old_ep.flatten()], dim=0)
-                else:
+                if env_id != "Env_RILC":
                     obs  = torch.cat([
                         q.flatten(), dq.flatten(), \
                         r_f.flatten(), dr_f.flatten(), \
                         uRL_old.flatten(), uILC.flatten()*0, uILC_old_ep.flatten()*0,
                         e_old_ep.flatten(), de_old_ep.flatten()], dim=0)
+                else:
+                    obs  = torch.cat([
+                        q.flatten(), dq.flatten(), \
+                        r_f.flatten(), dr_f.flatten(), \
+                        uRL_old.flatten(), uILC.flatten(), uILC_old_ep.flatten(),
+                        e_old_ep.flatten(), de_old_ep.flatten()], dim=0)
                 
                 obs_np = env.normalize_obs(obs)
 
                 url, _ = model_rl.predict(obs_np, deterministic=True)
-                uRL    = env.rescale_action(url).view(-1,1) if FL_RL else torch.zeros(2,1)
+                uRL    = env.rescale_action(url).view(-1,1)
                 # uRL = (torch.rand(2,1)*2-1)*2
                 uRL_old_ep_ts[:, :, i] = uRL.clone()
                 uILC_old_ep_ts[:, :, i] = uILC.clone()
@@ -375,9 +346,8 @@ if __name__ == '__main__':
             
             for _ in range(scaling):
                 
-                # r_, dr_, ddr_ = minjerk(qi = qi, qf = qf, duration = taskT, t = t)
-                r_, dr_, ddr_ = des_traj_at(t=t)
-
+                r_, dr_, ddr_ = minjerk(qi = qi, qf = qf, duration = taskT, t = t)
+                
                 # get state
                 q[0]  = torch.from_numpy(data.sensor("q_hip").data)
                 q[1]  = torch.from_numpy(data.sensor("q_knee").data)
@@ -406,7 +376,12 @@ if __name__ == '__main__':
                 uFB = torch.matmul(torch.diag(torch.tensor([kp, kp])),e_) \
                     + torch.matmul(torch.diag(torch.tensor([kv, kv])),de_)
                 
-                uTot = uMB + uFB + uRL_interp + uILC_interp + d[:,i,ep].reshape(2,1)
+                # total control to rob! - update dynamic
+                if env_id != "Env_RILC":
+                    uTot = uMB + uFB + uRL_interp + d[:,i,ep].reshape(2,1)
+                    uILC_interp *= 0
+                else:
+                    uTot = uMB + uFB + uRL_interp + uILC_interp + d[:,i,ep].reshape(2,1)
                 
                 data.ctrl[:] = uTot.flatten().numpy()
                 mujoco.mj_step(model, data, nstep=frame_skip)
@@ -418,6 +393,9 @@ if __name__ == '__main__':
                 mujoco_renderer.render("human")
             
             # update partial logging
+            e_tmp.append(e_.flatten().clone())
+            de_tmp.append(de_.flatten().clone())
+            dde_tmp.append(dde_.flatten().clone())
             q_tmp.append(q.flatten().clone())
             dq_tmp.append(dq.flatten().clone())
             ddq_tmp.append(ddq.flatten().clone())
@@ -551,17 +529,6 @@ if __name__ == '__main__':
         
         plt.suptitle(f"ILC Episode {i+1}")
         plt.tight_layout()
-        
-    for i in [0, n_ep_reset-1]:
-        plt.figure(figsize=(6,6))
-        plt.title("Check Trajectory")
-        plt.plot([robot.getForwKinEE(r)[0][0] for r in r_list.T], [robot.getForwKinEE(r)[0][1] for r in r_list.T], label="ref traj")
-        plt.plot([robot.getForwKinEE(q)[0][0] for q in q_list[i]], [robot.getForwKinEE(q)[0][1] for q in q_list[i]], label=f"traj_sim ep {i+1}")
-        plt.legend()
-        plt.xlabel("q1 [rad]")
-        plt.ylabel("q2 [rad]")
-        plt.axis('equal')
-        plt.grid()
     plt.show()
     
     if visual:

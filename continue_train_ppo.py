@@ -28,8 +28,12 @@ if __name__ == '__main__':
 
     visual = False
     
-    yaml_str        = parent_str+ "/" +dat_str+ "/" +'config.yaml'
-    config:dict     = load_config(yaml_str)
+    # yaml_str        = parent_str+ "/" +dat_str+ "/" +'config.yaml'
+    # config:dict     = load_config(yaml_str)
+
+    yaml_str = 'config/softleg_env_mjc.yaml'
+    section  = '...'
+    config:dict   = load_config_section(yaml_str, section)
 
     env_id: str     = config['env_id']
     taskT: float    = config['taskT']
@@ -44,7 +48,6 @@ if __name__ == '__main__':
     ldde: float     = config['ldde']
     kp: float       = config['kp']
     kv: float       = config['kv']
-    fl_noILC: bool  = config['fl_noILC']
     chunks: int     = config['chunks']
     seed: int       = config['seed']
     pi:list[float]  = config['pi']
@@ -87,13 +90,12 @@ if __name__ == '__main__':
             ldde       = ldde,
             kp         = kp,
             kv         = kv,
-            fl_noILC   = fl_noILC,
             seed       = seed,) 
         for i in range(n_envs)])
     
     env = VecMonitor(env)
     
-    mycallback = CB4TB(reset_epN=n_ep_reset, modelFolder="model", logFolder="log", checkFreq=PPO_n_steps)
+    mycallback = CB4TB(reset_epN=n_ep_reset, modelFolder="model", logFolder="log", checkFreq=PPO_n_steps*10)
     with open(mycallback.modelsPath+'/config.yaml', 'w') as file:
         yaml.dump(config, file)
     

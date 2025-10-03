@@ -11,36 +11,83 @@ default : &default
   n_ep_reset : 5       # number of episode to use in a single policy update
   n_envs     : 16      # number of environment
   n_update   : 200     # number of policy update
-  le         : 0.2
-  lde        : 0.4
+  le         : 0.0002
+  lde        : 0.0004
   ldde       : 0.0
   kp         : 0.4
   kv         : 0.25
-  chunks     : 8
-  fl_noILC   : False
+  chunks     : 16
   seed       : 42
   pi         : [64,64]
   vf         : [64,64]
 
-multi_task : &multi_task
+
+minjerk_task : &minjerk_task
   <<: *default
+  env_id   : 'Env_RILC'
+  n_ep_reset : 5
+  f_robot  : 100
+  scaling  : 2
+  n_envs   : 64
+  chunks   : 32
+  info     : 'multi traj with minjerk'
 
-  env_id   : 'Env_RILC' # environment name
-  
-  n_ep_reset : 5       # number of episode to use in a single policy update
+1env_task : &1env_task
+  <<: *minjerk_task
+  env_id   : 'Env_RILC_RANGE'
+  n_envs   : 1
+  n_update : 200
+  chunks   : 5
+  info     : 'single env for traj with minjerk'
 
-  f_robot  : 100     # robot update frequency [Hz]
-  scaling  : 2      # scaling factor of frequency (f_policy w.r.t. f_robot)
 
-  n_envs   : 64      # number of environment
-
+constrained_task : &constrained_task
+  <<: *minjerk_task
+  env_id   : 'Env_RILC_RANGE'
+  n_envs   : 8
+  n_update : 200
   chunks   : 16
-  info     : 'multi task'
+  info     : '
+        self.q_range_task = torch.tensor(torch.pi/3)
+        rand_number = torch.rand(2,1)*2-1
+        self.delta_q_task = torch.tensor([[torch.pi/2],[0]])
+        self.qf = self.q_range_task*rand_number + self.delta_q_task
+        for traj with minjerk'
 
+rilc :
+  <<: *minjerk_task
 
-classic_rl :
-  <<: *multi_task
+rilc_1env :
+  <<: *1env_task
 
-  env_id   : 'Env_classic_RL' # environment name
-  info     : 'multi task'
+rilc_constrained :
+  <<: *constrained_task
 
+rl_constrained :
+  <<: *constrained_task
+  env_id   : 'Env_RL_RANGE'
+
+rl :
+  <<: *minjerk_task
+  env_id   : 'Env_RL'
+
+rl_1env :
+  <<: *1env_task
+  env_id   : 'Env_RL_RANGE'
+
+rilc_liss : &liss
+  <<: *minjerk_task
+  n_envs   : 64
+  env_id   : 'Env_RILC_LISS'
+  taskT    : 4.0
+  kp       : .5
+  kv       : .3
+  le       : 0.0008
+  lde      : 0.0004
+  chunks   : 32
+  info     : 'liss'
+
+rl_liss :
+  <<: *liss
+  env_id   : 'Env_RL_LISS' # environment name
+  info     : 'liss'

@@ -1,6 +1,7 @@
 import torch
 from classes.robots.manipulator_RR      import Sim_RR, SimManURDF
 import os 
+
 class SoftLeg_RR(Sim_RR):
     """ Simulator of SoftLeg. """
     

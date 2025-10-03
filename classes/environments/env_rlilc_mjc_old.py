@@ -25,18 +25,6 @@ URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_con
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
 
 
-def load_trajectory(filename: str = 'complete_traj.pt') -> torch.Tensor:
-
-    if os.path.exists(filename):
-        complete_traj = torch.load(filename, weights_only=True)
-        # print(f"Trajectory loaded from {filename}")
-    return complete_traj
-
-TRAJ_LISS = load_trajectory(filename=os.path.join(abs_path, "references", "traj_test.pt"))
-
-
-
-
 class Env_RILC(MujocoEnv, utils.EzPickle):
     """ Environment for RL+ILC.
     
@@ -52,6 +40,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
             kp (float, optional): gain of PD for error. Defaults to 0.04.
             kv (float, optional): gain of PD for dot error. Defaults to 0.025.
             relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
+            fl_noILC (bool, optional): flag to not use ILC control. Defaults to False.
             dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
             seed (int, optional): seed use to define trajectories. Defaults to None.
     """
@@ -76,6 +65,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         ldde : float        = 0.08,
         kp : float          = 0.4,
         kv : float          = 0.25,
+        fl_noILC:bool       = False,
         seed : int          = None,
         dtype : torch.dtype = torch.float32,
         **kwargs,
@@ -93,6 +83,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
                 kp (float, optional): gain of PD for error. Defaults to 0.04.
                 kv (float, optional): gain of PD for dot error. Defaults to 0.025.
                 relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
+                fl_noILC (bool, optional): flag to not use ILC control. Defaults to False.
                 dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
                 seed (int, optional): seed use to define trajectories. Defaults to None.
         """
@@ -142,6 +133,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         self.taskT        = taskT
         self.stayT        = stayT
         self.dtype        = dtype
+        self.forced_noILC = fl_noILC
         self.n_ep_reset   = n_ep_reset
         self.le           = le
         self.lde          = lde
@@ -156,8 +148,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         self.des_traj_at = self.minjerk
         
         self.q_range_task = torch.tensor(torch.pi)
-        self.delta_q_task = torch.zeros(2,1)
-        self.qf_list = []
+        self.delta_q_task = torch.tensor(torch.pi/20)
         
         # -------------------------------------- PIN_ROBOT -------------------------------------- #
         self._load_pin_robot(URDF_PATH)
@@ -297,7 +288,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         self._uFBold  = self.env_PD0.clone()
         
         rand_number = torch.rand(2,1)*2-1
-        self.qf = self.q_range_task*rand_number + self.delta_q_task
+        self.qf = self.q_range_task*rand_number
 
     def _build_dicts(self):
         """ define useful dict to analyse environment
@@ -505,9 +496,9 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         de_   = dr_ - dq
         dde_  = ddr_ - ddq
         # Update useful memory of ILC
-        # iM       = self.pin_rob.getInvMass(q=q)
-        # u_delta = torch.matmul(iM, self._uILCold+self._uFBold)
-        u_delta = self._uILCold+self._uFBold
+        iM       = self.pin_rob.getInvMass(q=q)
+        u_delta = torch.matmul(iM, self._uILCold+self._uFBold)
+        # u_delta = self._uILCold+self._uFBold
         # update ERROR memory of ILC
         self.ILC.updateMemError(e_=e_,de_=de_,dde_=dde_)
         # update INPUT memory of ILC
@@ -519,11 +510,11 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         self.epDE[:,:,count] = de_.clone()
         
         # get new control of ILC
-        if self.env_epis != 0:
-            # M = self.pin_rob.getMass(q=q)
+        if self.env_epis != 0 and not self.forced_noILC:
             uilc = self.ILC.getControl()
-            # uILC = torch.matmul(M,uilc)
-            uILC = uilc
+            M = self.pin_rob.getMass(q=q)
+            uILC = torch.matmul(M,uilc)
+            # uILC = uilc
         else:
             uILC = torch.zeros_like(self.pin_rob.u0)
         
@@ -571,8 +562,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
             
             # generate new reference
             rand_number = torch.rand(2,1)*2-1
-            self.qf = self.q_range_task*rand_number + self.delta_q_task
-            self.qf_list.append(self.qf.clone())
+            self.qf = self.q_range_task*rand_number
             #self.qf = torch.tensor([[torch.pi/2,torch.pi/2]]).T
             q, dq = self._get_state()
             self.qi = q.clone()
@@ -764,6 +754,7 @@ class Env_RL(Env_RILC):
             kp (float, optional): gain of PD for error. Defaults to 0.04.
             kv (float, optional): gain of PD for dot error. Defaults to 0.025.
             relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
+            fl_noILC (bool, optional): flag to not use ILC control. Defaults to False.
             dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
             seed (int, optional): seed use to define trajectories. Defaults to None.
     """
@@ -788,6 +779,7 @@ class Env_RL(Env_RILC):
         ldde : float        = 0.0008,
         kp : float          = 0.04,
         kv : float          = 0.025,
+        fl_noILC:bool       = False,
         seed : int          = None,
         dtype : torch.dtype = torch.float32,
         **kwargs,
@@ -805,6 +797,7 @@ class Env_RL(Env_RILC):
                 kp (float, optional): gain of PD for error. Defaults to 0.04.
                 kv (float, optional): gain of PD for dot error. Defaults to 0.025.
                 relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
+                fl_noILC (bool, optional): flag to not use ILC control. Defaults to False.
                 dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
                 seed (int, optional): seed use to define trajectories. Defaults to None.
         """
@@ -820,6 +813,7 @@ class Env_RL(Env_RILC):
             ldde       = ldde,
             kp         = kp,
             kv         = kv,
+            fl_noILC   = fl_noILC,
             seed       = seed,
             dtype      = dtype,
             **kwargs,)
@@ -864,435 +858,12 @@ class Env_RL(Env_RILC):
         uILC = torch.zeros_like(self.pin_rob.u0)
         
         return uILC
-
-
-class Env_RILC_LISS(Env_RILC):
-    """ Environment for RL+ILC with a Lissajous trajectory.
-    
-        Args:
-            taskT (float, optional): task duration. Defaults to 1.0.
-            f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation timestep of dynamic (used for computation stability): Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-            scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-            stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-            n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-            le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-            lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-            ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-            kp (float, optional): gain of PD for error. Defaults to 0.04.
-            kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-            relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-            dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-            seed (int, optional): seed use to define trajectories. Defaults to None.
-    """
-
-    metadata = {
-        "render_modes": [
-            "human",
-            "rgb_array",
-            "depth_array",
-        ]
-    }
-    
-    def __init__(
-        self,
-        taskT : float       = 1.0,
-        f_robot : float     = 500,
-        scaling : int       = 10,
-        stayT : float       = 0.0,
-        n_ep_reset : int    = 5,  
-        le : float          = 0.02,
-        lde : float         = 0.04,
-        ldde : float        = 0.08,
-        kp : float          = 0.4,
-        kv : float          = 0.25,
-        seed : int          = None,
-        dtype : torch.dtype = torch.float32,
-        **kwargs,
-        ):
-        
-        """ Args:
-                taskT (float, optional): task duration. Defaults to 1.0.
-                f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation  timestep of dynamic: Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-                scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-                stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-                n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-                le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-                lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-                ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-                kp (float, optional): gain of PD for error. Defaults to 0.04.
-                kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-                relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-                dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-                seed (int, optional): seed use to define trajectories. Defaults to None.
-        """
-        
-        super().__init__(
-            taskT      = taskT,
-            f_robot    = f_robot,
-            scaling    = scaling,
-            stayT      = stayT,
-            n_ep_reset = n_ep_reset,
-            le         = le,
-            lde        = lde,
-            ldde       = ldde,
-            kp         = kp,
-            kv         = kv,
-            seed       = seed,
-            dtype      = dtype,
-            **kwargs,)
-        
-        self.complete_traj = TRAJ_LISS
-        self.des_traj_at = self.custom_lissajous_at
-        
-    def _load_pin_robot(self, urdf_path):
-        """ define robot
-        """
-        # ---------------------------------------- ROBOT ---------------------------------------- #
-        pin_robot = Sim_RR(urdf_path=urdf_path, ee_name='LH_ANKLE')
-        # attribute robot
-        pin_robot.setState(q0=TRAJ_LISS[:2,0].clone(), dq0=TRAJ_LISS[2:4,0].clone())
-        self.u0 = pin_robot.getGravity(pin_robot.q0).clone()
-        
-        self.pin_rob = pin_robot
-        self.qi = self.pin_rob.q0.clone()
-        self.init_qpos = self.pin_rob.q0.flatten().numpy().copy()
-        self.init_qvel = self.pin_rob.dq0.flatten().numpy().copy()
-    
-    def custom_lissajous_at(self, t: float) -> list[torch.Tensor, torch.Tensor, torch.Tensor]:
-        
-        idx = int(t // self.dt)
-        des_traj = self.complete_traj[:, idx]
-
-        q_des   = des_traj[0:2].view(2,1)
-        dq_des  = des_traj[2:4].view(2,1)
-        ddq_des = des_traj[4:6].view(2,1)
-        
-        return q_des, dq_des, ddq_des
-
-
-class Env_RL_LISS(Env_RILC_LISS):
-    """ Environment for RL+ILC with a Lissajous trajectory.
-    
-        Args:
-            taskT (float, optional): task duration. Defaults to 1.0.
-            f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation timestep of dynamic (used for computation stability): Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-            scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-            stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-            n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-            le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-            lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-            ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-            kp (float, optional): gain of PD for error. Defaults to 0.04.
-            kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-            relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-            dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-            seed (int, optional): seed use to define trajectories. Defaults to None.
-    """
-
-    metadata = {
-        "render_modes": [
-            "human",
-            "rgb_array",
-            "depth_array",
-        ]
-    }
-    
-    def __init__(
-        self,
-        taskT : float       = 1.0,
-        f_robot : float     = 500,
-        scaling : int       = 10,
-        stayT : float       = 0.0,
-        n_ep_reset : int    = 5,  
-        le : float          = 0.02,
-        lde : float         = 0.04,
-        ldde : float        = 0.08,
-        kp : float          = 0.4,
-        kv : float          = 0.25,
-        seed : int          = None,
-        dtype : torch.dtype = torch.float32,
-        **kwargs,
-        ):
-        
-        """ Args:
-                taskT (float, optional): task duration. Defaults to 1.0.
-                f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation  timestep of dynamic: Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-                scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-                stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-                n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-                le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-                lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-                ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-                kp (float, optional): gain of PD for error. Defaults to 0.04.
-                kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-                relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-                dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-                seed (int, optional): seed use to define trajectories. Defaults to None.
-        """
-        
-        super().__init__(
-            taskT      = taskT,
-            f_robot    = f_robot,
-            scaling    = scaling,
-            stayT      = stayT,
-            n_ep_reset = n_ep_reset,
-            le         = le,
-            lde        = lde,
-            ldde       = ldde,
-            kp         = kp,
-            kv         = kv,
-            seed       = seed,
-            dtype      = dtype,
-            **kwargs,)
-        
-        self.complete_traj = TRAJ_LISS
-        self.des_traj_at = self.custom_lissajous_at
-    
-    def _ilc_routine(self) -> torch.Tensor:
-        
-        # compute reference for ILC
-        r_, dr_, ddr_ = self.des_traj_at(t = self.t)
-
-        # get state
-        # self.data.joint("HIP").qpos
-        # self.data.sensordata
-        q, dq = self._get_state()
-        ddq   = (dq-self.dq_old)*self.f_robot
-        
-        # compute env error
-        e_    = r_ - q
-        e_    = self.pin_rob.angle_normalize(e_)
-        de_   = dr_ - dq
-        dde_  = ddr_ - ddq
-        # Update useful memory of ILC
-        # iM       = self.pin_rob.getInvMass(q=q)
-        # u_delta = torch.matmul(iM, self._uILCold+self._uFBold)
-        u_delta = self._uILCold+self._uFBold
-        # update ERROR memory of ILC
-        self.ILC.updateMemError(e_=e_,de_=de_,dde_=dde_)
-        # update INPUT memory of ILC
-        self.ILC.updateMemInput(u_delta)
-        
-        # env variables
-        count = self.env_step
-        self.epE[:,:,count] = e_.clone()
-        self.epDE[:,:,count] = de_.clone()
-        
-        # # get new control of ILC
-        # if self.env_epis != 0 and not self.forced_noILC:
-        #     # M = self.pin_rob.getMass(q=q)
-        #     uilc = self.ILC.getControl()
-        #     # uILC = torch.matmul(M,uilc)
-        #     uILC = uilc
-        # else:
-        uILC = torch.zeros_like(self.pin_rob.u0)
-        
-        return uILC
-
-
-class Env_RILC_RANGE(Env_RILC):
-    """ Environment for RL+ILC with a Lissajous trajectory.
-    
-        Args:
-            taskT (float, optional): task duration. Defaults to 1.0.
-            f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation timestep of dynamic (used for computation stability): Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-            scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-            stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-            n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-            le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-            lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-            ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-            kp (float, optional): gain of PD for error. Defaults to 0.04.
-            kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-            relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-            dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-            seed (int, optional): seed use to define trajectories. Defaults to None.
-    """
-
-    metadata = {
-        "render_modes": [
-            "human",
-            "rgb_array",
-            "depth_array",
-        ]
-    }
-    
-    def __init__(
-        self,
-        taskT : float       = 1.0,
-        f_robot : float     = 500,
-        scaling : int       = 10,
-        stayT : float       = 0.0,
-        n_ep_reset : int    = 5,  
-        le : float          = 0.02,
-        lde : float         = 0.04,
-        ldde : float        = 0.08,
-        kp : float          = 0.4,
-        kv : float          = 0.25,
-        seed : int          = None,
-        dtype : torch.dtype = torch.float32,
-        **kwargs,
-        ):
-        
-        """ Args:
-                taskT (float, optional): task duration. Defaults to 1.0.
-                f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation  timestep of dynamic: Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-                scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-                stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-                n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-                le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-                lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-                ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-                kp (float, optional): gain of PD for error. Defaults to 0.04.
-                kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-                relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-                dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-                seed (int, optional): seed use to define trajectories. Defaults to None.
-        """
-        
-        super().__init__(
-            taskT      = taskT,
-            f_robot    = f_robot,
-            scaling    = scaling,
-            stayT      = stayT,
-            n_ep_reset = n_ep_reset,
-            le         = le,
-            lde        = lde,
-            ldde       = ldde,
-            kp         = kp,
-            kv         = kv,
-            seed       = seed,
-            dtype      = dtype,
-            **kwargs,)
-        
-        self.q_range_task = torch.tensor(torch.pi/3)
-        rand_number = torch.rand(2,1)*2-1
-        self.delta_q_task = torch.tensor([[torch.pi/2],[0]])
-        self.qf = self.q_range_task*rand_number + self.delta_q_task
-
-
-class Env_RL_RANGE(Env_RILC_RANGE):
-    """ Environment for RL+ILC with a Lissajous trajectory.
-    
-        Args:
-            taskT (float, optional): task duration. Defaults to 1.0.
-            f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation timestep of dynamic (used for computation stability): Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-            scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-            stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-            n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-            le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-            lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-            ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-            kp (float, optional): gain of PD for error. Defaults to 0.04.
-            kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-            relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-            dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-            seed (int, optional): seed use to define trajectories. Defaults to None.
-    """
-
-    metadata = {
-        "render_modes": [
-            "human",
-            "rgb_array",
-            "depth_array",
-        ]
-    }
-    
-    def __init__(
-        self,
-        taskT : float       = 1.0,
-        f_robot : float     = 500,
-        scaling : int       = 10,
-        stayT : float       = 0.0,
-        n_ep_reset : int    = 5,  
-        le : float          = 0.02,
-        lde : float         = 0.04,
-        ldde : float        = 0.08,
-        kp : float          = 0.4,
-        kv : float          = 0.25,
-        seed : int          = None,
-        dtype : torch.dtype = torch.float32,
-        **kwargs,
-        ):
-        
-        """ Args:
-                taskT (float, optional): task duration. Defaults to 1.0.
-                f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation  timestep of dynamic: Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-                scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-                stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-                n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-                le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-                lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-                ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-                kp (float, optional): gain of PD for error. Defaults to 0.04.
-                kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-                relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-                dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-                seed (int, optional): seed use to define trajectories. Defaults to None.
-        """
-        
-        super().__init__(
-            taskT      = taskT,
-            f_robot    = f_robot,
-            scaling    = scaling,
-            stayT      = stayT,
-            n_ep_reset = n_ep_reset,
-            le         = le,
-            lde        = lde,
-            ldde       = ldde,
-            kp         = kp,
-            kv         = kv,
-            seed       = seed,
-            dtype      = dtype,
-            **kwargs,)
-        
-    def _ilc_routine(self) -> torch.Tensor:
-        
-        # compute reference for ILC
-        r_, dr_, ddr_ = self.des_traj_at(t = self.t)
-
-        # get state
-        # self.data.joint("HIP").qpos
-        # self.data.sensordata
-        q, dq = self._get_state()
-        ddq   = (dq-self.dq_old)*self.f_robot
-        
-        # compute env error
-        e_    = r_ - q
-        e_    = self.pin_rob.angle_normalize(e_)
-        de_   = dr_ - dq
-        dde_  = ddr_ - ddq
-        # Update useful memory of ILC
-        # iM       = self.pin_rob.getInvMass(q=q)
-        # u_delta = torch.matmul(iM, self._uILCold+self._uFBold)
-        u_delta = self._uILCold+self._uFBold
-        # update ERROR memory of ILC
-        self.ILC.updateMemError(e_=e_,de_=de_,dde_=dde_)
-        # update INPUT memory of ILC
-        self.ILC.updateMemInput(u_delta)
-        
-        # env variables
-        count = self.env_step
-        self.epE[:,:,count] = e_.clone()
-        self.epDE[:,:,count] = de_.clone()
-        
-        # # get new control of ILC
-        # if self.env_epis != 0 and not self.forced_noILC:
-        #     # M = self.pin_rob.getMass(q=q)
-        #     uilc = self.ILC.getControl()
-        #     # uILC = torch.matmul(M,uilc)
-        #     uILC = uilc
-        # else:
-        uILC = torch.zeros_like(self.pin_rob.u0)
-        
-        return uILC
-
 
 
 
 if __name__ == '__main__':
     
-    env = Env_RILC_LISS(f_robot=100, scaling=2)
+    env = Env_RILC(f_robot=100, scaling=2)
     env.reset()
     
     for _ in range(10):

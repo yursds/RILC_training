@@ -28,18 +28,9 @@ minjerk_task : &minjerk_task
   n_ep_reset : 5
   f_robot  : 100
   scaling  : 2
-  n_envs   : 64
-  chunks   : 32
+  n_envs   : 16
+  chunks   : 16
   info     : 'multi traj with minjerk'
-
-1env_task : &1env_task
-  <<: *minjerk_task
-  env_id   : 'Env_RILC_RANGE'
-  n_envs   : 1
-  n_update : 200
-  chunks   : 5
-  info     : 'single env for traj with minjerk'
-
 
 constrained_task : &constrained_task
   <<: *minjerk_task
@@ -57,8 +48,9 @@ constrained_task : &constrained_task
 rilc :
   <<: *minjerk_task
 
-rilc_1env :
-  <<: *1env_task
+rl :
+  <<: *minjerk_task
+  env_id   : 'Env_RL'
 
 rilc_constrained :
   <<: *constrained_task
@@ -67,27 +59,3 @@ rl_constrained :
   <<: *constrained_task
   env_id   : 'Env_RL_RANGE'
 
-rl :
-  <<: *minjerk_task
-  env_id   : 'Env_RL'
-
-rl_1env :
-  <<: *1env_task
-  env_id   : 'Env_RL_RANGE'
-
-rilc_liss : &liss
-  <<: *minjerk_task
-  n_envs   : 64
-  env_id   : 'Env_RILC_LISS'
-  taskT    : 4.0
-  kp       : .5
-  kv       : .3
-  le       : 0.0008
-  lde      : 0.0004
-  chunks   : 32
-  info     : 'liss'
-
-rl_liss :
-  <<: *liss
-  env_id   : 'Env_RL_LISS' # environment name
-  info     : 'liss'

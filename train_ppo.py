@@ -21,7 +21,7 @@ from stable_baselines3.common.callbacks     import CallbackList, CheckpointCallb
 if __name__ == '__main__':
     
     yaml_str = 'config/softleg_env_mjc.yaml'
-    section  = 'rilc_constrained'
+    section  = 'rl'
 
     config:dict   = load_config_section(yaml_str, section)
 

@@ -1,0 +1,23 @@
+chunks: 16
+env_id: Env_RILC
+extra: ''
+f_robot: 100
+info: multi traj with minjerk
+kp: 0.4
+kv: 0.25
+ldde: 0.0
+lde: 0.0004
+le: 0.0002
+n_envs: 16
+n_ep_reset: 5
+n_update: 200
+pi:
+- 64
+- 64
+scaling: 2
+seed: 42
+stayT: 0.0
+taskT: 1.0
+vf:
+- 64
+- 64

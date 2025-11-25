@@ -19,11 +19,20 @@ abs_path  = os.path.join(os.path.dirname((os.path.abspath(__file__))),'classes')
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
 EP_OVERRIDE = 5
+SAVE_ONLY_LAST_EP = True
+IP_POS_MISMATCH = False
+MASS_MISMATCH = True
+
+unique_name = ""
+if IP_POS_MISMATCH:
+    unique_name = "_mismatch_ipos" 
+elif MASS_MISMATCH:
+    unique_name += "_mismatch_mass"
 
 parent_str = "model"
 dat_str = "rilc_constrained" # "rilc" "rl_classic"
 step_str = "best_model/best_model.zip"
-last_filename = dat_str + f"_{EP_OVERRIDE}ep_random_mismatch_mass_5"
+last_filename = dat_str + f"_{EP_OVERRIDE}ep_random{unique_name}"
 
 print(dat_str)
 model_str = parent_str + "/" + dat_str + "/" + step_str
@@ -172,12 +181,14 @@ if __name__ == '__main__':
     
     model_rl = PPO.load(model_str)
     
-    # ++++++++++++++++++++++ reset ++++++++++++++++++++++++++++++++++++++++++
+    # ! ++++++++++++++++++++++ reset ++++++++++++++++++++++++++++++++++++++++++
     
     # model.dof_frictionloss = model.dof_frictionloss*(1.2)
     # model.dof_armature     = model.dof_armature*(1.2)
-    model.body_mass        = model.body_mass*(1.2)
-    # model.body_ipos        = model.body_ipos*(1.2)
+    if MASS_MISMATCH:
+        model.body_mass        = model.body_mass*(1.2)
+    if IP_POS_MISMATCH:
+        model.body_ipos        = model.body_ipos*(1.2)
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
 
@@ -394,18 +405,19 @@ if __name__ == '__main__':
                 uILC_tmp.append(uILC_interp.flatten().clone())
                 uFB_tmp.append(uFB.flatten().clone())
                 uRL_tmp.append(uRL_interp.flatten().clone())
-            
-            # update complete logging
-            e_list.append(e_tmp)
-            de_list.append(de_tmp)
-            dde_list.append(dde_tmp)
-            q_list.append(q_tmp)
-            dq_list.append(dq_tmp)
-            ddq_list.append(ddq_tmp)
-            uRL_list.append(uRL_tmp)
-            uMB_list.append(uMB_tmp)
-            uILC_list.append(uILC_tmp)
-            uFB_list.append(uFB_tmp)
+                
+            if SAVE_ONLY_LAST_EP and ep == n_ep_reset-1:
+                # update complete logging
+                e_list.append(e_tmp)
+                de_list.append(de_tmp)
+                dde_list.append(dde_tmp)
+                q_list.append(q_tmp)
+                dq_list.append(dq_tmp)
+                ddq_list.append(ddq_tmp)
+                uRL_list.append(uRL_tmp)
+                uMB_list.append(uMB_tmp)
+                uILC_list.append(uILC_tmp)
+                uFB_list.append(uFB_tmp)
         
         Ye_list.append(e_list)
         Yde_list.append(de_list)

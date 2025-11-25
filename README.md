@@ -53,8 +53,8 @@ Further information can be found in the respective folders.
     - Run the following command <ins>**only the first time after cloning**</ins> to resolve [bug](https://github.com/Farama-Foundation/Gymnasium/pull/746) and create the `leg_constrained.urdf` file for correct loading of robot:
 
         ```bash
-        # Resolve bug in MuJoCo rendering
-        python3 ./_setup_/change_mujoco_rendering.py
+        # Resolve bug in MuJoCo rendering, uncomment only in docker case
+        # python3 ./_setup_/change_mujoco_rendering.py
         # Creates absolute paths for the meshes
         python3 ./_setup_/gen_urdf.py
         ```

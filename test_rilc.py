@@ -20,14 +20,15 @@ URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_con
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
 
 parent_str = "model"
-dat_str = "rilc_64" # "rilc" "rl_classic"
+dat_str = "rilc_constrained" # "rilc" "rl_classic" "rilc_constrained"
 step_str = "best_model/best_model.zip"
 
 print(dat_str)
 model_str = parent_str + "/" + dat_str + "/" + step_str
 
-QF = torch.tensor([[torch.pi/4], [torch.pi/3]])
-QF = torch.tensor([[-2.232461929321289], [-3.069495677947998]])
+QF = torch.tensor([[torch.pi/3], [torch.pi/3]])
+# QF = torch.tensor([[-2.232461929321289], [-3.069495677947998]])
+QF = torch.tensor([[2.4], [-1.4]])
 FL_ILC = True
 FL_RL = True
 OBS_ILC = False

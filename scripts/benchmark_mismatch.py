@@ -1,16 +1,28 @@
+import os
+import sys
+
+# Add local directory to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from __init__ import *
 import torch
 import mujoco
 from matplotlib import pyplot as plt
-import os
-import sys
 import functools
 import numpy as np
 from stable_baselines3 import PPO
 
-# Add local directory to path
-# Add local directory to path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# --- Plotting Style ---
+plt.rcParams['text.usetex'] = True
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.serif'] = ['Times New Roman']
+FONT_SIZE = 15
+plt.rcParams['font.size'] = FONT_SIZE
+plt.rcParams['axes.labelsize'] = FONT_SIZE
+plt.rcParams['xtick.labelsize'] = FONT_SIZE
+plt.rcParams['ytick.labelsize'] = FONT_SIZE
+plt.rcParams['legend.fontsize'] = FONT_SIZE
+plt.rcParams['figure.titlesize'] = FONT_SIZE
 
 from classes.controllers.ilc import ILC_base
 from classes.controllers.noilc import NOILC
@@ -393,32 +405,49 @@ def run_experiment(mode="ILC", mismatch=False):
 
 if __name__ == '__main__':
     # Run Experiments
+    controllers = ["NOILC", "DDILC", "RILC"]
+    modes = [("Nominal", False, "--"), ("Mismatch", True, "-")] # Name, mismatch_bool, linestyle
+    
     results = {}
     
-    # 1. NOILC (Nominal) - No mismatch in Environment
-    results["NOILC (Nominal)"] = run_experiment("NOILC", mismatch=False)
-    
-    # 2. NOILC (Mismatch) - Mismatch in Environment (but NOILC uses Nominal G)
-    results["NOILC (Mismatch)"] = run_experiment("NOILC", mismatch=True)
-    
-    # 3. DDILC (Mismatch) - Mismatch in Env, DDILC Identifies it
-    results["DDILC (Mismatch)"] = run_experiment("DDILC", mismatch=True)
-    
-    # 4. RILC (Mismatch) - Comparison
-    results["RILC (Mismatch)"] = run_experiment("RILC", mismatch=True)
-    
+    for ctrl in controllers:
+        results[ctrl] = {}
+        for mode_name, is_mismatch, _ in modes:
+            print(f"Running {ctrl} - {mode_name}...")
+            # For DDILC Nominal, we might want to skip or run. 
+            # Assuming we run all for comparison.
+            try:
+                rmse = run_experiment(ctrl, mismatch=is_mismatch)
+                results[ctrl][mode_name] = rmse
+            except Exception as e:
+                print(f"Failed {ctrl} {mode_name}: {e}")
+                results[ctrl][mode_name] = []
+
     # Plotting
     plt.figure(figsize=(10,6))
-    for name, data in results.items():
-        plt.plot(data, marker='o', label=name)
+    
+    # Define colors for controllers
+    colors = {
+        "NOILC": "dodgerblue",
+        "DDILC": "limegreen",
+        "RILC": "tomato"
+    }
+    
+    for ctrl in controllers:
+        color = colors.get(ctrl, "black")
+        for mode_name, is_mismatch, linestyle in modes:
+            if mode_name in results[ctrl] and results[ctrl][mode_name]:
+                label = f"{ctrl} ({mode_name})"
+                plt.plot(results[ctrl][mode_name], marker='o', linestyle=linestyle, color=color, label=label)
         
-    plt.title("Robustness Benchmark: Nominal vs Mismatch (20%)")
-    plt.xlabel("Episode")
-    plt.ylabel("RMSE [rad]")
+    plt.title(r"Robustness Benchmark: Nominal (Dashed) vs Mismatch (Solid)")
+    plt.xlabel(r"Episode")
+    plt.ylabel(r"RMSE [rad]")
     # plt.yscale('log') # Removed log scale
     plt.legend()
-    plt.grid(True, which="both", ls="-")
+    plt.grid(True, which="both", ls="-", alpha=0.5)
     img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
     os.makedirs(img_dir, exist_ok=True)
     plt.savefig(os.path.join(img_dir, "benchmark_mismatch.png"))
-    print("\nBenchmark Mismatch plot saved to benchmark_mismatch.png")
+    plt.savefig(os.path.join(img_dir, "benchmark_mismatch.pdf"))
+    print("\nBenchmark Mismatch plot saved to benchmark_mismatch.png and .pdf")

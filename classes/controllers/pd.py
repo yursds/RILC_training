@@ -51,17 +51,17 @@ class PD_base(object):
         
         return u
     
-    def setParams(self, Kp: torch.Tensor = None, Kd: torch.Tensor = None):
+    def setParams(self, Kp: torch.Tensor = None, Kv: torch.Tensor = None):
         """
         Set the parameters of the PD controller.
 
         :param Kp: Proportional gain matrix. If None, it is not changed.
         :type Kp: torch.Tensor, optional
-        :param Kd: Derivative gain matrix. If None, it is not changed.
-        :type Kd: torch.Tensor, optional
+        :param Kv: Derivative gain matrix. If None, it is not changed.
+        :type Kv: torch.Tensor, optional
         """
         if Kp is not None:
             self.Kp = Kp
         
-        if Kd is not None:
-            self.Kd = Kd
+        if Kv is not None:
+            self.Kv = Kv

@@ -18,8 +18,8 @@ class ILC_base(object):
     :type Lde: torch.Tensor, optional
     :param Ldde: learning gain scalar for ddot error. Defaults to torch.tensor(0.0).
     :type Ldde: torch.Tensor, optional
-    :param treshold: rmse treshold to stop updating ILC. Defaults to 1e-3.
-    :type treshold: float, optional
+    :param threshold: rmse threshold to stop updating ILC. Defaults to 1e-3.
+    :type threshold: float, optional
     :param dtype: data type. Defaults to torch.float32.
     :type dtype: torch.dtype, optional
     """
@@ -31,7 +31,7 @@ class ILC_base(object):
         Le: torch.Tensor = torch.tensor(0.01),
         Lde: torch.Tensor = torch.tensor(0.0),
         Ldde: torch.Tensor = torch.tensor(0.0),
-        treshold: float = 1e-3,
+        threshold: float = 1e-3,
         dtype: torch.dtype = torch.float32,
     ):
         """
@@ -49,8 +49,8 @@ class ILC_base(object):
         :type Lde: torch.Tensor, optional
         :param Ldde: learning gain scalar for ddot error. Defaults to torch.tensor(0.0).
         :type Ldde: torch.Tensor, optional
-        :param treshold: rmse treshold to stop updating ILC. Defaults to 1e-3.
-        :type treshold: float, optional
+        :param threshold: rmse threshold to stop updating ILC. Defaults to 1e-3.
+        :type threshold: float, optional
         :param dtype: data type. Defaults to torch.float32.
         :type dtype: torch.dtype, optional
         """
@@ -58,7 +58,7 @@ class ILC_base(object):
         self.dtype = dtype
         self.dimU = dimU
         self.samples = samples
-        self.threshold = treshold
+        self.threshold = threshold
         self.done = False
         self.rmse = None
         self.best_u = torch.zeros(dimU, samples)

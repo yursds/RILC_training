@@ -1,2 +1,10 @@
 __pycache__
 *.urdf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Output
+img/

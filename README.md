@@ -7,54 +7,59 @@ In particular, the [Reinforced Iterative Learning Control (RILC)]() is implement
 
 The repository is built with a [Docker container](https://docs.docker.com/desktop/) to ensure reproducibility. For more information follow [Docker Installation Preliminaries](#docker_install).
 
-- The `_setup_` folder is used to finalize the *.urdf file and fix a [bug](https://github.com/Farama-Foundation/Gymnasium/pull/746) within MuJoCo installation in Gymnasium.
+- The `_setup_` folder is used to finalize the \*.urdf file and fix a [bug](https://github.com/Farama-Foundation/Gymnasium/pull/746) within MuJoCo installation in Gymnasium.
 - The `classes` folder contains some submodules to facilitate the creation of robots (using [Pinocchio](https://github.com/stack-of-tasks/pinocchio/tree/master)), references, controllers, environments, and callbacks (during training).
 
-- The `config` folder contains the main parameters to start the training by executing `train_rlilc.py`. 
+- The `scripts` folder contains benchmark scripts. The main training script `train_ppo.py` is located in the root directory.
 
-- The `log` and `model` folders are populated during training, and the **rl_classic** and **rilc** models used for the [paper]() are trained already. 
+- The `log` and `model` folders are populated during training, and the **rl_classic** and **rilc** models used for the [paper]() are trained already.
 
-- The trained policy can be tested with `test_rlilc.py`.
+- The trained policy can be tested with `scripts/compare_controllers.py` or other benchmark scripts.
 
 - The `utils` folder contains some useful functions to load .yaml files more easily.
 
 Further information can be found in the respective folders.
 
 ## Docker Installation Preliminaries
-1. Install [Docker Engine](https://docs.docker.com/engine/install/ubuntu/), (suggesting `apt` installation). 
-    - Follow [post-installation steps for Linux](https://docs.docker.com/engine/install/linux-postinstall/).
-3. Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+
+1. Install [Docker Engine](https://docs.docker.com/engine/install/ubuntu/), (suggesting `apt` installation).
+   - Follow [post-installation steps for Linux](https://docs.docker.com/engine/install/linux-postinstall/).
+2. Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
 
 ## Installation and First Setup
 
 1. Clone repository and navigate to it:
 
-    ```bash
-    git clone https://github.com/yursds/RILC_training.git
-    cd ./RILC_training
-    ```
+   ```bash
+   git clone https://github.com/yursds/RILC_training.git
+   cd ./RILC_training
+   ```
 
 2. Build and Run Docker Image
 
-    Enter to `.dockercontainer`:
-    ```bash
-    cd .dockercontainer 
-    ```
-   
-    To build image `RILC_training`:
-    ```bash
-    ./build.bash
-    ```
-    To run image `RILC_training`:
-    ```bash
-    ./run.bash
-    ```
+   Enter to `.dockercontainer`:
 
-    - Run the following command <ins>**only the first time after cloning**</ins> to resolve [bug](https://github.com/Farama-Foundation/Gymnasium/pull/746) and create the `leg_constrained.urdf` file for correct loading of robot:
+   ```bash
+   cd .dockercontainer
+   ```
 
-        ```bash
-        # Resolve bug in MuJoCo rendering, uncomment only in docker case
-        # python3 ./_setup_/change_mujoco_rendering.py
-        # Creates absolute paths for the meshes
-        python3 ./_setup_/gen_urdf.py
-        ```
+   To build image `RILC_training`:
+
+   ```bash
+   ./build.bash
+   ```
+
+   To run image `RILC_training`:
+
+   ```bash
+   ./run.bash
+   ```
+
+   - Run the following command <ins>**only the first time after cloning**</ins> to resolve [bug](https://github.com/Farama-Foundation/Gymnasium/pull/746) and create the `leg_constrained.urdf` file for correct loading of robot:
+
+     ```bash
+     # Resolve bug in MuJoCo rendering, uncomment only in docker case
+     # python3 ./_setup_/change_mujoco_rendering.py
+     # Creates absolute paths for the meshes
+     python3 ./_setup_/gen_urdf.py
+     ```

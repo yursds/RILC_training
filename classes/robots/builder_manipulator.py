@@ -29,6 +29,68 @@ class ManURDF(RobURDF, ManURDF_ABC):
         self.ee_name    = ee_name
         
     # METHODS FOR ROBOT'S KINEMATICS   
+    def getAnalyticalLinearizedDynamics(self, q: torch.Tensor, dq: torch.Tensor, u: torch.Tensor, damp_fl: bool = True) -> list[torch.Tensor, torch.Tensor]:
+        """
+        Compute continuous-time linearized dynamics matrices A, B using Pinocchio analytical derivatives.
+        dx = A x + B u
+        where x = [q, dq]^T
+        
+        Args:
+            q, dq, u: Current state and input (torch.Tensor)
+            damp_fl: Whether to include damping D in the model
+            
+        Returns:
+            A (2n x 2n), B (2n x n) matrices of the continuous system
+        """
+        q_np = q.flatten().detach().numpy()
+        dq_np = dq.flatten().detach().numpy()
+        u_np = u.flatten().detach().numpy()
+        
+        # Calculate tau_net applied to the rigid body (subtracting damping if needed)
+        # The equation is: M ddq + C dq + G = u - D dq
+        # So tau_net = u - D dq
+        
+        tau_net = u_np.copy()
+        D = None
+        if damp_fl:
+            D = torch.diag(torch.from_numpy(self.robModel.damping)).numpy()
+            tau_net -= D @ dq_np
+
+        # Compute derivatives of Forward Dynamics (ddq)
+        # dacc/dq, dacc/dv, dacc/dtau
+        
+        # Note: pinocchio.computeABADerivatives takes (model, data, q, v, tau)
+        pin.computeABADerivatives(self.robModel, self.robData, q_np, dq_np, tau_net)
+        
+        dacc_dq = torch.from_numpy(self.robData.ddq_dq).type(self._dtype)
+        dacc_dv = torch.from_numpy(self.robData.ddq_dv).type(self._dtype)
+        dacc_dtau = torch.from_numpy(self.robData.Minv).type(self._dtype) 
+        
+        # Adjust dacc_dv for damping term:
+        # ddq = f_pin(q, dq, u - D dq)
+        # d(ddq)/d(dq) = d(f_pin)/d(v) + d(f_pin)/d(tau_in) * d(tau_in)/d(dq)
+        # d(tau_in)/d(dq) = -D
+        
+        if damp_fl:
+             dacc_dv_total = dacc_dv + torch.matmul(dacc_dtau, -torch.from_numpy(D).type(self._dtype))
+        else:
+             dacc_dv_total = dacc_dv
+             
+        # Construct A and B
+        # A = [[0, I], [dacc_dq, dacc_dv_total]]
+        # B = [[0], [dacc_dtau]]
+        
+        n = self._dim_q
+        A = torch.zeros(2*n, 2*n).type(self._dtype)
+        B = torch.zeros(2*n, n).type(self._dtype)
+        
+        A[:n, n:] = torch.eye(n).type(self._dtype)
+        A[n:, :n] = dacc_dq
+        A[n:, n:] = dacc_dv_total
+        B[n:, :] = dacc_dtau
+        
+        return A, B
+
     def getForwKinEE(self, q:torch.Tensor=None,) -> list[torch.Tensor, torch.Tensor]:
         """ Compute forward kinematic of frame end effector. [trasl, rot] """
         

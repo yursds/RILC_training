@@ -26,7 +26,8 @@ plt.rcParams['figure.titlesize'] = FONT_SIZE
 
 from classes.controllers.ilc import ILC_base
 from classes.controllers.noilc import NOILC
-from classes.controllers.ddilc import DDILC
+
+
 from classes.robots.manipulator_RR import Sim_RR
 from classes.environments.env_rlilc_mjc import Env_RILC as ENV
 
@@ -80,7 +81,7 @@ def get_linearized_matrices(robot, q, dq, u, dt, damping=True):
     nq = robot._dim_q
     nu = robot._dim_u
     nx = 2 * nq
-    eps = 1e-4
+    eps = 1e-2
     A = torch.zeros(nx, nx)
     B = torch.zeros(nx, nu)
     
@@ -112,15 +113,28 @@ def get_linearized_matrices(robot, q, dq, u, dt, damping=True):
     robot.setState(q=q_bak, dq=dq_bak)
     return A, B
 
-def construct_lifted_model_linearized_nonlinear(robot, q_traj, dq_traj, u_traj, dt, samples, dimU):
-    print("Linearizing dynamics along trajectory (Model-Based)...")
+def construct_lifted_model_linearized_nonlinear(robot, q_traj, dq_traj, u_traj, dt, samples, dimU, use_analytical=True):
+    print(f"Linearizing dynamics along trajectory (Model-Based, Analytical={use_analytical})...")
     As, Bs = [], []
     C = torch.cat([torch.eye(dimU), torch.zeros(dimU, dimU)], dim=1)
+    
     for k in range(samples):
         q_k = q_traj[:, k].view(-1,1)
         dq_k = dq_traj[:, k].view(-1,1)
         u_k = u_traj[:, k].view(-1,1)
-        Ak, Bk = get_linearized_matrices(robot, q_k, dq_k, u_k, dt)
+        
+        if use_analytical:
+            # Get Continuous A, B from Pinocchio
+            Ac, Bc = robot.getAnalyticalLinearizedDynamics(q=q_k, dq=dq_k, u=u_k, damp_fl=True)
+            # Discretize (Euler for simplicity, matching finite diff order roughly)
+            # x_{k+1} = x_k + (Ac x_k + Bc u_k) * dt
+            # x_{k+1} = (I + Ac*dt) x_k + (Bc*dt) u_k
+            Ak = torch.eye(2*dimU) + Ac * dt
+            Bk = Bc * dt
+        else:
+            # Finite Difference
+            Ak, Bk = get_linearized_matrices(robot, q_k, dq_k, u_k, dt)
+            
         As.append(Ak); Bs.append(Bk)
         
     G = torch.zeros(dimU * samples, dimU * samples)
@@ -203,49 +217,13 @@ def run_experiment(mode="ILC", mismatch=False):
             tau_ref = robot.getInvDyn(r_val, dr_val, ddr_val, damp_fl=True)
             u_traj_ref[:, i] = tau_ref.flatten()
             
-        G_mat = construct_lifted_model_linearized_nonlinear(robot, q_traj_ref, dq_traj_ref, u_traj_ref, dt=dt_pol, samples=samples, dimU=njoint)
+        G_mat = construct_lifted_model_linearized_nonlinear(robot, q_traj_ref, dq_traj_ref, u_traj_ref, dt=dt_pol, samples=samples, dimU=njoint, use_analytical=True)
         
-        Q_mat = 10.0 * torch.eye(njoint * samples)
-        R_mat = 0.1 * torch.eye(njoint * samples) 
+        Q_mat = 1.0 * torch.eye(njoint * samples)
+        R_mat = 0.09 * torch.eye(njoint * samples) 
         controller = NOILC(dimU=njoint, samples=samples, G=G_mat, Q=Q_mat, R=R_mat, threshold=1e-4)
         
         # Initial Guess (Nominal Model)
-        controller.uEp = u_traj_ref.clone()
-        controller.best_u = u_traj_ref.clone()
-        controller.newEp()
-
-    elif mode == "DDILC":
-        # Data-Driven ILC
-        u_traj_ref = torch.zeros(njoint, samples)
-        for i in range(samples):
-            r_val, dr_val, ddr_val = des_traj_at(t=i*dt_pol)
-            tau_ref = robot.getInvDyn(r_val, dr_val, ddr_val, damp_fl=True)
-            u_traj_ref[:, i] = tau_ref.flatten()
-        
-        # 2. Instantiate DDILC (Perform SysID internally)
-        gravity_comp = robot.getGravity(q=qi).flatten().numpy()
-        
-        Q_mat = 10.0 * torch.eye(njoint * samples)
-        R_mat = 1.0 * torch.eye(njoint * samples) 
-        
-        controller = DDILC(
-            dimU=njoint, 
-            samples=samples, 
-            model_mj=model_mj, 
-            data_mj=data_mj, 
-            u_nom=u_traj_ref, 
-            dt=dt_pol, 
-            frame_skip=frame_skip, 
-            q_init=qpos_init, 
-            dq_init=qvel_init, 
-            gravity_comp=gravity_comp,
-            scaling=scaling,
-            Q=Q_mat,
-            R=R_mat,
-            threshold=1e-4,
-            epsilon=1e-2
-        )
-        
         controller.uEp = u_traj_ref.clone()
         controller.best_u = u_traj_ref.clone()
         controller.newEp()
@@ -319,7 +297,7 @@ def run_experiment(mode="ILC", mismatch=False):
             controller.updateMemError(e_=e_, de_=de_, dde_=dde_)
             
             # 2. Get ILC Control
-            if mode in ["NOILC", "DDILC"]:
+            if mode == "NOILC":
                  uILC_raw = controller.getControl() 
                  uILC = uILC_raw
             else:
@@ -405,7 +383,7 @@ def run_experiment(mode="ILC", mismatch=False):
 
 if __name__ == '__main__':
     # Run Experiments
-    controllers = ["NOILC", "DDILC", "RILC"]
+    controllers = ["ILC", "NOILC", "RILC"]
     modes = [("Nominal", False, "--"), ("Mismatch", True, "-")] # Name, mismatch_bool, linestyle
     
     results = {}
@@ -414,8 +392,6 @@ if __name__ == '__main__':
         results[ctrl] = {}
         for mode_name, is_mismatch, _ in modes:
             print(f"Running {ctrl} - {mode_name}...")
-            # For DDILC Nominal, we might want to skip or run. 
-            # Assuming we run all for comparison.
             try:
                 rmse = run_experiment(ctrl, mismatch=is_mismatch)
                 results[ctrl][mode_name] = rmse
@@ -423,31 +399,48 @@ if __name__ == '__main__':
                 print(f"Failed {ctrl} {mode_name}: {e}")
                 results[ctrl][mode_name] = []
 
-    # Plotting
-    plt.figure(figsize=(10,6))
-    
-    # Define colors for controllers
-    colors = {
-        "NOILC": "dodgerblue",
-        "DDILC": "limegreen",
-        "RILC": "tomato"
-    }
-    
-    for ctrl in controllers:
-        color = colors.get(ctrl, "black")
-        for mode_name, is_mismatch, linestyle in modes:
-            if mode_name in results[ctrl] and results[ctrl][mode_name]:
-                label = f"{ctrl} ({mode_name})"
-                plt.plot(results[ctrl][mode_name], marker='o', linestyle=linestyle, color=color, label=label)
+    # Plotting Helper
+    def plot_results(log_scale=False):
+        plt.figure(figsize=(10,6))
         
-    plt.title(r"Robustness Benchmark: Nominal (Dashed) vs Mismatch (Solid)")
-    plt.xlabel(r"Episode")
-    plt.ylabel(r"RMSE [rad]")
-    # plt.yscale('log') # Removed log scale
-    plt.legend()
-    plt.grid(True, which="both", ls="-", alpha=0.5)
-    img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
-    os.makedirs(img_dir, exist_ok=True)
-    plt.savefig(os.path.join(img_dir, "benchmark_mismatch.png"))
-    plt.savefig(os.path.join(img_dir, "benchmark_mismatch.pdf"))
-    print("\nBenchmark Mismatch plot saved to benchmark_mismatch.png and .pdf")
+        # Define colors for controllers
+        colors = {
+            "ILC": "orange",
+            "NOILC": "dodgerblue",
+            "RILC": "tomato",
+
+        }
+        
+        for ctrl in controllers:
+            color = colors.get(ctrl, "black")
+            for mode_name, is_mismatch, linestyle in modes:
+                if mode_name in results[ctrl] and results[ctrl][mode_name]:
+                    label = f"{ctrl} ({mode_name})"
+                    plt.plot(results[ctrl][mode_name], marker='o', linestyle=linestyle, color=color, label=label)
+            
+        from matplotlib.ticker import MaxNLocator
+        plt.title(r"Robustness Benchmark: Nominal (Dashed) vs Mismatch (Solid)")
+        plt.xlabel(r"Episode")
+        plt.ylabel(r"RMSE [rad]")
+        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+        
+        suffix = ""
+        if log_scale:
+            plt.yscale('log')
+            suffix = "_log"
+            
+        plt.legend()
+        plt.grid(True, which="both", ls="-", alpha=0.5)
+        
+        img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
+        os.makedirs(img_dir, exist_ok=True)
+        
+        save_base = f"benchmark_mismatch{suffix}"
+        plt.savefig(os.path.join(img_dir, f"{save_base}.pdf"))
+        print(f"Saved plot to {save_base}.pdf")
+
+    # Plot Linear Scale
+    plot_results(log_scale=False)
+    
+    # Plot Log Scale
+    plot_results(log_scale=True)

@@ -12,42 +12,25 @@ import functools
 import numpy as np
 from stable_baselines3 import PPO
 
+from benchmark_utils import *
+
 # --- Plotting Style ---
-plt.rcParams['text.usetex'] = True
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['font.serif'] = ['Times New Roman']
-FONT_SIZE = 15
-plt.rcParams['font.size'] = FONT_SIZE
-plt.rcParams['axes.labelsize'] = FONT_SIZE
-plt.rcParams['xtick.labelsize'] = FONT_SIZE
-plt.rcParams['ytick.labelsize'] = FONT_SIZE
-plt.rcParams['legend.fontsize'] = FONT_SIZE
-plt.rcParams['figure.titlesize'] = FONT_SIZE
+setup_plotting()
+
 
 from classes.controllers.ilc import ILC_base
 from classes.controllers.noilc import NOILC
 
-
 from classes.robots.manipulator_RR import Sim_RR
 from classes.environments.env_rlilc_mjc import Env_RILC as ENV
 
-# --- Configuration Constants ---
-abs_path = os.path.join(os.path.dirname((os.path.abspath(__file__))), '..', 'classes')
-URDF_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
-MJC_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
-
-# RL Model Path
-parent_str = "model"
-dat_str = "rilc_16"
-step_str = "best_model/best_model.zip"
-model_str = os.path.join(os.getcwd(), parent_str, dat_str, step_str)
 
 # Simulation Param
 f_robot = 100
 scaling = 2
 taskT = 1.0
-n_ep_initial = 20
-n_ep_switch = 10
+n_ep_initial = 15
+n_ep_switch = 15
 n_ep_total = n_ep_initial + n_ep_switch
 kp = 0.0 # KPI=0 to isolate ILC performance
 kv = 0.25 
@@ -59,63 +42,362 @@ ldde_cfg = 0.0
 
 # Trajectories
 QF_A = torch.tensor([[2.4], [-1.4]])
-QF_B = torch.tensor([[-1.5], [0.0]]) # New Target
+QF_B = torch.tensor([[-1.5], [0.8]]) # New Target
 
-# --- Helper Functions ---
-def minjerk(qi:torch.Tensor,qf:torch.Tensor,duration:float,t:float) -> list[torch.Tensor,torch.Tensor,torch.Tensor]:
-    delta_q = qi-qf
-    q_new   = qi + delta_q * (15*(t/duration)**4 - 6*(t/duration)**5 - 10*(t/duration)**3)
-    dq_new  = delta_q * (60*(t**3)/(duration**4) - 30*((t**4)/(duration**5)) - 30*(t**2)/(duration**3))
-    ddq_new = delta_q * (180*(t**2)/(duration**4) - 120*((t**3)/(duration**5)) - 60*(t/(duration**3)))
-    return q_new, dq_new, ddq_new
-
-def angle_normalize(x:torch.Tensor) -> torch.Tensor:
-    sx = torch.sin(x)
-    cx = torch.cos(x)
-    x = torch.atan2(sx,cx)
-    return x
-
-def resample_u(u_old:torch.Tensor, u_new:torch.Tensor, num_step:int) -> torch.Tensor:
-    du_step = (u_new-u_old)/num_step
-    return du_step
-
-# --- Linearization for NOILC ---
-def construct_lifted_model_linearized_nonlinear(robot, q_traj, dq_traj, u_traj, dt, samples, dimU, use_analytical=True):
-    print(f"Linearizing dynamics along trajectory (Model-Based, Analytical={use_analytical})...")
-    As, Bs = [], []
-    C = torch.cat([torch.eye(dimU), torch.zeros(dimU, dimU)], dim=1)
+# --- Helper ---
+def plot_action_contributions(traces, episode_idx, alg_name, suffix=""):
+    """
+    Plots action contributions for a specific episode.
+    traces: dict with keys 'uMB', 'uFB', 'uILC', 'uRL' containing lists of tensors
+    """
+    if episode_idx not in traces:
+        return
+        
+    data = traces[episode_idx]
     
-    for k in range(samples):
-        q_k = q_traj[:, k].view(-1,1)
-        dq_k = dq_traj[:, k].view(-1,1)
-        u_k = u_traj[:, k].view(-1,1)
+    # Convert lists to stacked tensors and numpy
+    uMB = torch.stack(data['uMB']).numpy()
+    uFB = torch.stack(data['uFB']).numpy()
+    uILC = torch.stack(data['uILC']).numpy()
+    uRL = torch.stack(data['uRL']).numpy()
+    
+    # Sums
+    uTot = uMB + uFB + uILC + uRL
+    uRL_ILC = uRL + uILC
+    
+    plt.figure(figsize=(18, 3))
+    
+    # 1. uTOT
+    plt.subplot(1, 6, 1)
+    plt.plot(uTot[:,0], label="J1")
+    plt.plot(uTot[:,1], label="J2")
+    plt.title(f"uTOT")
+    plt.xlabel("steps")
+    plt.grid()
+    plt.legend()
+    
+    # 2. uRL + uILC
+    plt.subplot(1, 6, 2)
+    plt.plot(uRL_ILC[:,0])
+    plt.plot(uRL_ILC[:,1])
+    plt.title(f"uRL+uILC")
+    plt.xlabel("steps")
+    plt.grid()
+    
+    # 3. uMB
+    plt.subplot(1, 6, 3)
+    plt.plot(uMB[:,0])
+    plt.plot(uMB[:,1])
+    plt.title(f"uMB")
+    plt.xlabel("steps")
+    plt.grid()
+    
+    # 4. uILC
+    plt.subplot(1, 6, 4)
+    plt.plot(uILC[:,0])
+    plt.plot(uILC[:,1])
+    plt.title(f"uILC")
+    plt.xlabel("steps")
+    plt.grid()
+    
+    # 5. uFB
+    plt.subplot(1, 6, 5)
+    plt.plot(uFB[:,0])
+    plt.plot(uFB[:,1])
+    plt.title(f"uFB")
+    plt.xlabel("steps")
+    plt.grid()
+    
+    # 6. uRL
+    plt.subplot(1, 6, 6)
+    plt.plot(uRL[:,0])
+    plt.plot(uRL[:,1])
+    plt.title(f"uRL")
+    plt.xlabel("steps")
+    plt.grid()
+    
+    plt.suptitle(f"{alg_name} - Episode {episode_idx} Actions")
+    plt.tight_layout()
+    
+    img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
+    os.makedirs(img_dir, exist_ok=True)
+    save_path = os.path.join(img_dir, f"actions_{alg_name}_ep{episode_idx}{suffix}.pdf")
+    plt.savefig(save_path)
+    print(f"Saved action plot to {save_path}")
+    plt.close()
+
+def plot_evolution(traces, alg_name, suffix=""):
+    """
+    Plots evolution of trajectories and torques over episodes on a single figure.
+    """
+    episodes = sorted(traces.keys())
+    if not episodes:
+        return
         
-        # Get Continuous A, B from Pinocchio (Analytical)
-        Ac, Bc = robot.getAnalyticalLinearizedDynamics(q=q_k, dq=dq_k, u=u_k, damp_fl=True)
-        # Discretize (Euler)
-        Ak = torch.eye(2*dimU) + Ac * dt
-        Bk = Bc * dt
+    plt.figure(figsize=(16, 10))
+    
+    # Use a colormap for episodes to show progression
+    colors = plt.cm.viridis(np.linspace(0, 1, len(episodes)))
+    
+    for j in range(2): # 2 Joints
+        # Trajectory Subplot
+        plt.subplot(2, 2, j+1)
+        plt.title(f"Joint {j+1}: Trajectory Evolution")
+        
+        for i, ep in enumerate(episodes):
+            data = traces[ep]
+            if not data['q']: continue
             
-        As.append(Ak); Bs.append(Bk)
+            # Extract
+            q_act = torch.stack(data['q']).numpy()[:, j]
+            q_ref = torch.stack(data['q_ref']).numpy()[:, j]
+            t = np.arange(len(q_act))
+            
+            # Plot Ref (Only once per phase or style it?)
+            # Plotting ref for every ep ensures we see the switch
+            plt.plot(t, q_ref, color='k', linestyle=':', alpha=0.3, zorder=0) 
+            
+            # Plot Act
+            plt.plot(t, q_act, color=colors[i], label=f"Ep {ep}", linewidth=1.5)
+            
+        plt.ylabel("Angle [rad]")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
         
-    G = torch.zeros(dimU * samples, dimU * samples)
-    print("Building Lifted G Matrix (Model-Based)...")
-    for c_t in range(samples):
-        Bj = Bs[c_t]
-        for input_idx in range(dimU):
-            x_curr = Bj[:, input_idx].view(-1,1)
-            y_curr = C @ x_curr
-            for r_t in range(c_t + 1, samples):
-                 row_base = r_t * dimU
-                 col_idx = c_t * dimU + input_idx
-                 G[row_base:row_base+dimU, col_idx] = y_curr.flatten()
-                 if r_t < samples - 1:
-                     x_curr = As[r_t] @ x_curr
-                     y_curr = C @ x_curr
-    return G
+        # Torque Subplot
+        plt.subplot(2, 2, j+3) # 3 and 4
+        plt.title(f"Joint {j+1}: Torque Evolution (uTot)")
+        
+        for i, ep in enumerate(episodes):
+            data = traces[ep]
+            if not data['uMB']: continue
+            
+            # Calculate Total Torque
+            uMB = torch.stack(data['uMB']).numpy()[:, j]
+            uFB = torch.stack(data['uFB']).numpy()[:, j]
+            uILC = torch.stack(data['uILC']).numpy()[:, j]
+            uRL = torch.stack(data['uRL']).numpy()[:, j]
+            uTot = uMB + uFB + uILC + uRL
+            
+            t = np.arange(len(uTot))
+            
+            plt.plot(t, uTot, color=colors[i], label=f"Ep {ep}", linewidth=1.5)
+            
+        plt.ylabel("Torque [Nm]")
+        plt.xlabel("Step")
+        plt.grid(True, alpha=0.3)
+        # plt.legend() # Legend already in Traj plot matching colors
+        
+    plt.suptitle(f"{alg_name} - Evolution{suffix}")
+    plt.tight_layout()
+    
+    img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
+    os.makedirs(img_dir, exist_ok=True)
+    save_path = os.path.join(img_dir, f"evolution_{alg_name}{suffix}.pdf")
+    plt.savefig(save_path)
+    print(f"Saved evolution plot to {save_path}")
+    plt.close()
+
+def plot_interaction(traces, episode_idx, alg_name, suffix="", gt_trace=None, rilc_fresh_trace=None):
+    """
+    Overlays uRL and uILC, and shows Trajectories.
+    """
+    if episode_idx not in traces:
+        return
+        
+    data = traces[episode_idx]
+    
+    # Extract Data (convert to numpy)
+    uILC = torch.stack(data['uILC']).numpy()
+    uRL = torch.stack(data['uRL']).numpy()
+    uFB = torch.stack(data['uFB']).numpy()
+    uMB = torch.stack(data['uMB']).numpy()
+    
+    q_act = torch.stack(data['q']).numpy()
+    q_ref = torch.stack(data['q_ref']).numpy()
+    
+    uTot = uMB + uFB + uILC + uRL
+    uSum = uILC + uRL
+    
+    t = np.arange(len(uILC))
+    
+    # Process GT
+    uTot_GT = None
+    if gt_trace is not None:
+        try:
+           gt_uILC = torch.stack(gt_trace['uILC']).numpy()
+           gt_uRL = torch.stack(gt_trace['uRL']).numpy()
+           gt_uFB = torch.stack(gt_trace['uFB']).numpy()
+           gt_uMB = torch.stack(gt_trace['uMB']).numpy()
+           uTot_GT = gt_uILC + gt_uRL + gt_uFB + gt_uMB
+        except Exception as e: print(f"GT process error: {e}")
+
+    # Process Fresh
+    uTot_Fresh = None
+    if rilc_fresh_trace is not None:
+        try:
+            fr_uILC = torch.stack(rilc_fresh_trace['uILC']).numpy()
+            fr_uRL = torch.stack(rilc_fresh_trace['uRL']).numpy()
+            fr_uFB = torch.stack(rilc_fresh_trace['uFB']).numpy()
+            fr_uMB = torch.stack(rilc_fresh_trace['uMB']).numpy()
+            uTot_Fresh = fr_uILC + fr_uRL + fr_uFB + fr_uMB
+        except Exception as e: print(f"Fresh process error: {e}")
+
+    
+    plt.figure(figsize=(14, 8))
+
+    
+    for j in range(2): # Joints
+        # 1. Trajectory
+        plt.subplot(2, 2, j*2 + 1)
+        plt.plot(t, q_ref[:, j], label="q_ref", color="black", linestyle="--", linewidth=2)
+        plt.plot(t, q_act[:, j], label=f"q_{alg_name}", color="blue", linewidth=1.5)
+        plt.title(f"Joint {j+1} - Trajectory")
+        plt.ylabel("Angle [rad]")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # 2. Torques
+        plt.subplot(2, 2, j*2 + 2)
+        
+        # Components
+        if alg_name == "RILC":
+            plt.plot(t, uILC[:, j], label="uILC", color="orange", linestyle="--", alpha=0.7)
+            plt.plot(t, uRL[:, j], label="uRL", color="tomato", linestyle="-", alpha=0.7)
+        elif alg_name == "ILC" or alg_name == "NOILC": # For ILC/NOILC, uRL is zero, so only plot uILC
+            plt.plot(t, uILC[:, j], label="uILC", color="orange", linestyle="--", alpha=0.7)
+            
+        # Total Comparisons
+        if uTot_GT is not None:
+             plt.plot(t, uTot_GT[:, j], label="GT (Converged)", color="black", linestyle=":", linewidth=2, alpha=0.6)
+             
+        if uTot_Fresh is not None:
+             plt.plot(t, uTot_Fresh[:, j], label="Fresh Start", color="cyan", linestyle="-.", linewidth=2, alpha=0.6)
+
+        # Current Total
+        plt.plot(t, uTot[:, j], label="uTot (Curr)", color="green", linestyle="-.", alpha=0.5)
+        
+        plt.title(f"Joint {j+1} - Torques")
+        plt.ylabel("Torque [Nm]")
+        plt.xlabel("Step")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+    plt.suptitle(f"{alg_name} - Episode {episode_idx} Interaction{suffix}")
+    plt.tight_layout()
+    
+    img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
+    os.makedirs(img_dir, exist_ok=True)
+    save_path = os.path.join(img_dir, f"interaction_{alg_name}_ep{episode_idx}{suffix}.pdf")
+    plt.savefig(save_path)
+    print(f"Saved interaction plot to {save_path}")
+    plt.close()
+
+
+def plot_all_trajectories(all_traces, fresh_trace=None, suffix="", dt=0.01):
+    """
+    Plots comparative trajectories for ILC, NOILC, RILC (and RL).
+    Episodes 0, 14 (Ref A) and 15, 29 (Ref B).
+    """
+    key_episodes = [0, 14, 15, 29]
+    
+    # Reduced width as requested
+    plt.figure(figsize=(18, 10))
+    
+    alg_colors = {
+        "ILC": "orange",
+        "NOILC": "dodgerblue",
+        "RILC": "tomato",
+        "RL": "purple"
+    }
+
+    # 1. Determine Y-Limits per Joint (Shared Scaling)
+    y_lims = [None, None]
+    for j in range(2):
+        vals = []
+        # Check all algorithms and episodes
+        for alg, traces in all_traces.items():
+            for ep in key_episodes:
+                if ep in traces:
+                    vals.append(torch.stack(traces[ep]['q']).numpy()[:, j])
+                    vals.append(torch.stack(traces[ep]['q_ref']).numpy()[:, j])
+        
+        # Check Fresh Trace
+        if fresh_trace:
+             for ep in key_episodes:
+                 if ep >= n_ep_initial:
+                     fr_ep = ep - n_ep_initial
+                     if fr_ep in fresh_trace:
+                         vals.append(torch.stack(fresh_trace[fr_ep]['q']).numpy()[:, j])
+
+        if vals:
+             all_ws = np.concatenate(vals)
+             y_min, y_max = np.min(all_ws), np.max(all_ws)
+             margin = (y_max - y_min) * 0.1
+             y_lims[j] = (y_min - margin, y_max + margin)
+
+    
+    for j in range(2): # 2 Joints
+        for i, ep in enumerate(key_episodes):
+            plt.subplot(2, 4, j*4 + i + 1)
+            
+            phase = "Ref A" if ep < n_ep_initial else "Ref B (Switch)"
+            title = f"Joint {j+1}: Ep {ep} ({phase})"
+            plt.title(title)
+            
+            ref_plotted = False
+            
+            # Plot Algorithms
+            for alg in sorted(all_traces.keys()):
+                traces = all_traces[alg]
+                if ep not in traces: continue
+                
+                data = traces[ep]
+                q_act = torch.stack(data['q']).numpy()[:, j]
+                t = np.arange(len(q_act)) * dt
+                
+                # Plot Ref once
+                if not ref_plotted:
+                    q_ref = torch.stack(data['q_ref']).numpy()[:, j]
+                    plt.plot(t, q_ref, color='k', linestyle=':', label="Ref", linewidth=2, zorder=10)
+                    ref_plotted = True
+                    
+                color = alg_colors.get(alg, 'grey')
+                plt.plot(t, q_act, color=color, label=f"{alg}", linewidth=1.5, alpha=0.8)
+                
+            # Plot RILC Fresh
+            if fresh_trace is not None and ep >= n_ep_initial:
+                fresh_ep = ep - n_ep_initial 
+                if fresh_ep in fresh_trace:
+                    data = fresh_trace[fresh_ep]
+                    q_fresh = torch.stack(data['q']).numpy()[:, j]
+                    t = np.arange(len(q_fresh)) * dt
+                    plt.plot(t, q_fresh, color='magenta', linestyle='-.', label="RILC Fresh", linewidth=1.5, alpha=0.8)
+
+            if j == 1: plt.xlabel("Time [s]")
+            if i == 0: plt.ylabel("Angle [rad]")
+            
+            if y_lims[j]:
+                plt.ylim(y_lims[j])
+            
+            # Smart Legend Placement - only on first plot of row or outside?
+            # User said "in appropriate place". 'best' is usually safest per subplot if not crowded.
+            plt.legend(loc='best', fontsize='x-small', framealpha=0.6)
+            plt.grid(True, alpha=0.3)
+
+    plt.suptitle(f"Trajectory Comparison{suffix}", fontsize=16)
+    plt.tight_layout()
+    
+    img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
+    os.makedirs(img_dir, exist_ok=True)
+    save_path = os.path.join(img_dir, f"trajectories_comparison{suffix}.pdf")
+    plt.savefig(save_path)
+    print(f"Saved comparative trajectories plot to {save_path}")
+    plt.close()
+
 
 # --- SIMULATION RUNNER ---
-def run_experiment(mode="ILC", mismatch=False, scenario="switch"):
+def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None, rilc_fresh_trace=None):
     # scenario: "switch" or "ref_B"
     print(f"\n--- Running Experiment: {mode} (Mismatch={mismatch}, Scenario={scenario}) ---")
     
@@ -147,7 +429,7 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch"):
         # 20% Mismatch applied to simulation model
         print("Applying 20% Mass/Friction Mismatch...")
         model_mj.body_mass[:] = model_mj.body_mass * 1.2
-        model_mj.dof_frictionloss[:] = model_mj.dof_frictionloss * 1.2
+        # model_mj.dof_frictionloss[:] = model_mj.dof_frictionloss * 1.2
     
     data_mj = mujoco.MjData(model_mj)
     frame_skip = int((1/f_robot)/model_mj.opt.timestep)
@@ -166,9 +448,10 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch"):
     controller = None
     model_rl = None
     
-    if mode == "RILC":
-        print(f"Loading RL model from {model_str}")
-        model_rl = PPO.load(model_str)
+    if mode == "RILC" or mode == "RL":
+        print(f"Loading RL model from {MODEL_STR}")
+        model_rl = PPO.load(MODEL_STR)
+
         
     if mode == "ILC" or mode == "RILC":
         le_tens = torch.tensor(le_cfg * f_policy)
@@ -213,6 +496,14 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch"):
     # Main Loop
     rmse_per_ep = []
     
+    # Episodes to trace
+    trace_episodes = [0, n_ep_initial-1, n_ep_initial, total_episodes-1] # First, Last A, Switch, Last
+    # Filter valid episodes 
+    trace_episodes = sorted(list(set([e for e in trace_episodes if e < total_episodes])))
+    
+    traces = {ep_idx: {'uMB': [], 'uFB': [], 'uILC': [], 'uRL': [], 'q': [], 'q_ref': []} for ep_idx in trace_episodes}
+
+    
     current_traj = initial_traj
     if scenario == "switch":
         print(f"Starting with Trajectory A ({n_ep_initial} eps)...")
@@ -224,14 +515,13 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch"):
         if scenario == "switch" and ep == n_ep_initial:
             print(f"--- Switching to Trajectory B (Ep {ep}) ---")
             current_traj = traj_B
-            # Note: For NOILC, we are NOT re-linearizing. We test robustness.
-            # For ILC, we continue learning (memory persists). Adaptation test.
             
         # Step ILC/NOILC logic
         if ep == 0:
             pass # Already called newEp
         else:
-            controller.stepILC()
+            if controller:
+                controller.stepILC()
             
         # Reset Env
         mujoco.mj_resetData(model_mj, data_mj)
@@ -262,9 +552,9 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch"):
             
             # State
             q_curr = torch.zeros(2,1)
-            dq_curr = torch.zeros(2,1)
             q_curr[0] = torch.from_numpy(data_mj.sensor("q_hip").data)
             q_curr[1] = torch.from_numpy(data_mj.sensor("q_knee").data)
+            dq_curr = torch.zeros(2,1)
             dq_curr[0] = torch.from_numpy(data_mj.sensor("dq_hip").data)
             dq_curr[1] = torch.from_numpy(data_mj.sensor("dq_knee").data)
             
@@ -282,22 +572,24 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch"):
             e_ep.append(e_.flatten().clone())
             
             # 1. Update ILC Memory (Error)
-            controller.updateMemError(e_=e_, de_=de_, dde_=dde_)
+            if controller:
+                controller.updateMemError(e_=e_, de_=de_, dde_=dde_)
             
             # 2. Get ILC Control
             if mode == "NOILC":
-                 uILC_raw = controller.getControl() 
-                 uILC = uILC_raw
+                 uILC = controller.getControl() 
+            elif mode == "RL":
+                 uILC = torch.zeros(2,1)
+                 if controller and hasattr(controller, 'idx'): controller.idx += 1
             else:
                 if ep > 0:
-                    uILC_raw = controller.getControl()
-                    uILC = uILC_raw
-                else:
+                    uILC = controller.getControl()
+                else: 
                     uILC = torch.zeros(2,1)
                     if hasattr(controller, 'idx'): controller.idx += 1
             
             # 3. RL Control (Only RILC)
-            if mode == "RILC":
+            if mode == "RILC" or mode == "RL":
                 t_pol = t + dt_pol
                 if t_pol <= taskT:
                     r_f, dr_f, _ = current_traj(t=t_pol) # Use CURRENT trajectory for RL obs
@@ -355,52 +647,85 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch"):
                 mujoco.mj_step(model_mj, data_mj, nstep=frame_skip)
                 mujoco.mj_rnePostConstraint(model_mj, data_mj)
                 t += dt_rob
+
+                # Logging for plots
+                if ep in trace_episodes:
+                    traces[ep]['uMB'].append(uMB.flatten().clone())
+                    traces[ep]['uFB'].append(uFB.flatten().clone())
+                    traces[ep]['uILC'].append(uILC_interp.flatten().clone())
+                    traces[ep]['uRL'].append(uRL_interp.flatten().clone())
+                    traces[ep]['q'].append(q_fast.flatten().clone())
+                    traces[ep]['q_ref'].append(r_rob.flatten().clone())
+
                 
             uRL_old = uRL_interp.clone()
             uILC_old = uILC_interp.clone()
             
             # 5. Update ILC Memory (Input)
-            controller.updateMemInput(uFB + uILC)
+            if controller:
+                controller.updateMemInput(uFB + uILC)
             
         # Ep End
         rmse = torch.sqrt(torch.mean(torch.stack(e_ep)**2)).item()
         rmse_per_ep.append(rmse)
         print(f"Ep {ep}: RMSE = {rmse:.4f}")
         
-    return rmse_per_ep
+    return rmse_per_ep, traces
 
 if __name__ == '__main__':
     # Run Experiments
-    controllers = ["ILC", "NOILC", "RILC"]
-    modes = [("Nominal", False, "--"), ("Mismatch", True, "-")] 
+    controllers = ["ILC", "NOILC", "RILC"] #, "RL"]
+    # modes = [("Nominal", False, "--"), ("Mismatch", True, "-")] 
+    modes = [("Nominal", False, "--")] # Only Nominal as requested
+    if ("RILC" in controllers or "RL" in controllers) and not os.path.exists(MODEL_STR):
+        print(f"Warning: RL Model {MODEL_STR} not found! RILC/RL will fail or use random.")
     
+    # Store traces per mode for comparative plotting
+    traces_store = { "Nominal": {}, "Mismatch": {} }
+    fresh_traces_store = { "Nominal": {}, "Mismatch": {} }
+    
+    # 1. Reference B Run (Pre-Training Reference) - Optional for Plot?
+    # Actually we only care about Switch Scenario for the plot requested.
+    # But code runs Ref B first for RMSE baseline.
+    
+    ref_results = {}
+    # Run Ref B loops...
+    for ctrl in controllers:
+        ref_results[ctrl] = {}
+        for mode_name, is_mismatch, _ in modes:
+            print(f"Running {ctrl} - {mode_name} (Reference B)...")
+            try:
+                rmse, traces = run_experiment(ctrl, mismatch=is_mismatch, scenario="ref_B")
+                ref_results[ctrl][mode_name] = rmse
+                
+                # Store RILC fresh traces for comparative plot
+                if ctrl == "RILC":
+                    fresh_traces_store[mode_name] = traces
+                    
+            except Exception as e:
+                print(f"Failed Reference {ctrl} {mode_name}: {e}")
+                # import traceback; traceback.print_exc()
+
+    # 2. Run Switch Experiments
     results = {}
     
-    # 1. Run Switch Experiments
     for ctrl in controllers:
         results[ctrl] = {}
         for mode_name, is_mismatch, _ in modes:
             print(f"Running {ctrl} - {mode_name} (Trajectory Switch Test)...")
             try:
-                rmse = run_experiment(ctrl, mismatch=is_mismatch, scenario="switch")
+                rmse, traces = run_experiment(ctrl, mismatch=is_mismatch, scenario="switch")
                 results[ctrl][mode_name] = rmse
+                
+                # Store traces for plotting
+                if mode_name in traces_store:
+                    traces_store[mode_name][ctrl] = traces
+                    
             except Exception as e:
                 print(f"Failed {ctrl} {mode_name}: {e}")
                 results[ctrl][mode_name] = []
-                
-    # 2. Run Reference B Experiments (Only Mismatch usually? Or both? Let's do both to match)
-    # We store these separately
-    ref_results = {}
-    for ctrl in controllers:
-        ref_results[ctrl] = {}
-        for mode_name, is_mismatch, _ in modes:
-             print(f"Running {ctrl} - {mode_name} (Reference B)...")
-             try:
-                 rmse = run_experiment(ctrl, mismatch=is_mismatch, scenario="ref_B")
-                 ref_results[ctrl][mode_name] = rmse
-             except Exception as e:
-                 print(f"Failed Reference {ctrl} {mode_name}: {e}")
-                 ref_results[ctrl][mode_name] = []
+                import traceback
+                traceback.print_exc()
 
     # Plotting Helper
     def plot_results(log_scale=False):
@@ -411,6 +736,7 @@ if __name__ == '__main__':
             "ILC": "orange",
             "NOILC": "dodgerblue",
             "RILC": "tomato",
+            "RL": "purple"
         }
         
         for ctrl in controllers:
@@ -422,41 +748,36 @@ if __name__ == '__main__':
                     plt.plot(results[ctrl][mode_name], marker='o', linestyle=linestyle, color=color, label=label)
                     
                 # Plot Reference B Data
-                # Offset by n_ep_initial (20)
+                # Offset by n_ep_initial (15)
                 if mode_name in ref_results[ctrl] and ref_results[ctrl][mode_name]:
                     data = ref_results[ctrl][mode_name]
                     x_axis = np.arange(n_ep_initial, n_ep_initial + len(data))
                     # Use lighter color or dotted line
-                    plt.plot(x_axis, data, linestyle=':', color=color, alpha=0.7) 
-                    # No label to avoid clutter, or maybe "Ref" in legend?
-                    # The user knows.
-            
-        from matplotlib.ticker import MaxNLocator
-        plt.title(r"Trajectory Switch (Ep 20): Adaptation vs Fresh Start (Dotted)")
-        plt.xlabel(r"Episode")
-        plt.ylabel(r"RMSE [rad]")
-        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
-        
-        # Draw vertical line at switch
-        plt.axvline(x=n_ep_initial, color='k', linestyle='-', alpha=0.3, label="Switch / Start B")
-        
-        suffix = ""
-        if log_scale:
-            plt.yscale('log')
-            suffix = "_log"
-            
-        plt.legend()
+                    plt.plot(x_axis, data, linestyle=':', color=color, alpha=0.7)
+
+        plt.title(f"RMSE (" + ("Log Scale" if log_scale else "Linear") + ")")
+        plt.xlabel("Episode")
+        plt.ylabel("RMSE")
+        if log_scale: plt.yscale('log')
         plt.grid(True, which="both", ls="-", alpha=0.5)
+        plt.legend()
+        plt.tight_layout()
         
         img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
         os.makedirs(img_dir, exist_ok=True)
-        
-        save_base = f"benchmark_switch_traj{suffix}"
-        plt.savefig(os.path.join(img_dir, f"{save_base}.pdf"))
-        print(f"Saved plot to {save_base}.pdf")
+        fname = "benchmark_switch_traj_log.pdf" if log_scale else "benchmark_switch_traj.pdf"
+        plt.savefig(os.path.join(img_dir, fname))
+        print(f"Saved plot to {fname}")
+        plt.close()
 
-    # Plot Linear Scale
+    # Plot Results (RMSE)
     plot_results(log_scale=False)
-    
-    # Plot Log Scale
     plot_results(log_scale=True)
+    
+    # Plot Comparative Trajectories
+    for mode_name, all_traces_n in traces_store.items():
+        if all_traces_n: # If not empty
+            suffix = f"_{mode_name.lower()}"
+            fresh_trace = fresh_traces_store.get(mode_name, None)
+            plot_all_trajectories(all_traces_n, fresh_trace=fresh_trace, suffix=suffix)
+

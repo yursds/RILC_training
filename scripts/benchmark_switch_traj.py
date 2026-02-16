@@ -8,6 +8,7 @@ from __init__ import *
 import torch
 import mujoco
 from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import functools
 import numpy as np
 from stable_baselines3 import PPO
@@ -29,8 +30,8 @@ from classes.environments.env_rlilc_mjc import Env_RILC as ENV
 f_robot = 100
 scaling = 2
 taskT = 1.0
-n_ep_initial = 15
-n_ep_switch = 15
+n_ep_initial = 20
+n_ep_switch = 20
 n_ep_total = n_ep_initial + n_ep_switch
 kp = 0.0 # KPI=0 to isolate ILC performance
 kv = 0.25 
@@ -41,8 +42,8 @@ lde_cfg = 0.0004
 ldde_cfg = 0.0
 
 # Trajectories
-QF_A = torch.tensor([[2.0], [-1.4]])
-QF_B = torch.tensor([[-2.0], [1.4]]) # New Target
+QF_A = torch.tensor([[2.4], [-1.4]])
+QF_B = torch.tensor([[1.], [-0.5]]) # New Target
 
 # --- Helper ---
 def plot_action_contributions(traces, episode_idx, alg_name, suffix=""):
@@ -751,46 +752,98 @@ if __name__ == '__main__':
 
     # Plotting Helper
     def plot_results(log_scale=False):
-        plt.figure(figsize=(10,6))
+        # Setup plotting style
+        textsize = 18
+        labelsize = 16
+        plt.rc('font', family='serif', serif='Times')
+        plt.rcParams["text.usetex"] = True
+        plt.rc('text.latex', preamble=r'\usepackage[utf8]{inputenc} \usepackage{amsmath} \usepackage{amsfonts}')
+        plt.rc('xtick', labelsize=textsize)
+        plt.rc('ytick', labelsize=textsize)
+        plt.rc('axes', titlesize=textsize)
+        plt.rc('legend', fontsize=textsize)
+        plt.rc('grid', linestyle='-.', alpha=0.5)
+        plt.rc('axes', grid=True)
+        plt.rcParams['figure.constrained_layout.use'] = True
+        
+        # Create single figure
+        fig, ax = plt.subplots(figsize=(8, 5))
         
         # Define colors for controllers
         colors = {
-            "ILC": "orange",
-            "NOILC": "dodgerblue",
-            "RILC": "tomato",
-            "RL": "purple"
+            "ILC": "tab:orange",
+            "NOILC": "tab:blue",
+            "RL": "tab:green",
+            "RILC": "tab:red",
         }
+        
+        # Define linestyles for modes
+        linestyles = {"Nominal": "--", "Switch": "-"}
+        
+        # Collect all RMSE values for consistent y-axis
+        all_rmse_values = []
         
         for ctrl in controllers:
             color = colors.get(ctrl, "black")
-            for mode_name, is_mismatch, linestyle in modes:
+            for mode_name, is_mismatch, _ in modes:
                 # Plot Switch Data
                 if mode_name in results[ctrl] and results[ctrl][mode_name]:
+                    linestyle = linestyles[mode_name]
+                    rmse_data = results[ctrl][mode_name]
                     label = f"{ctrl} ({mode_name})"
-                    plt.plot(results[ctrl][mode_name], marker='o', linestyle=linestyle, color=color, label=label)
                     
-                # Plot Reference B Data
-                # Offset by n_ep_initial (15)
+                    # Plot line
+                    ax.plot(rmse_data, label=label, linewidth=2, 
+                           color=color, linestyle=linestyle)
+                    
+                    # Plot markers (hollow circles)
+                    ax.scatter(range(len(rmse_data)), rmse_data, marker='o', 
+                              facecolors='none', edgecolors=color, s=50)
+                    
+                    all_rmse_values.extend(rmse_data)
+                    
+                # Plot Reference B Data (offset by n_ep_initial)
                 if mode_name in ref_results[ctrl] and ref_results[ctrl][mode_name]:
                     data = ref_results[ctrl][mode_name]
-                    label = f"{ctrl} ({mode_name})"
                     x_axis = np.arange(n_ep_initial, n_ep_initial + len(data))
-                    # Use lighter color or dotted line
-                    plt.plot(x_axis, data, linestyle=':', color=color, alpha=0.7, marker='', label=label + " (Ref B)")
-
-        plt.title(f"RMSE (" + ("Log Scale" if log_scale else "Linear") + ")")
-        plt.xlabel("Episode")
-        plt.ylabel("RMSE")
-        if log_scale: plt.yscale('log')
-        plt.grid(True, which="both", ls="-", alpha=0.5)
-        plt.legend()
+                    
+                    # Use dotted line for Ref B
+                    ax.plot(x_axis, data, linestyle=':', color=color, alpha=0.7, linewidth=2,
+                           label=f"{ctrl} ({mode_name}, Ref B)")
+                    ax.scatter(x_axis, data, marker='s', facecolors='none', edgecolors=color, s=40, alpha=0.7)
+                    
+                    all_rmse_values.extend(data)
+        
+        ax.set_xlabel('Episode', fontsize=textsize)
+        ax.set_ylabel('RMSE [rad]', fontsize=textsize)
+        ax.tick_params(axis='x', labelsize=labelsize)
+        ax.tick_params(axis='y', labelsize=labelsize)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.grid(True)
+        
+        # Set y-axis limits
+        if all_rmse_values:
+            y_max = max(all_rmse_values)
+            y_min = min(all_rmse_values) if not log_scale else max(min(all_rmse_values), 1e-4)
+            if log_scale:
+                ax.set_yscale('log')
+                ax.set_ylim(y_min * 0.8, y_max * 1.2)
+            else:
+                ax.set_ylim(0.0, y_max * 1.1)
+        
+        # Add legend
+        ax.legend(fontsize=textsize-4, frameon=True, loc='best')
+        
         plt.tight_layout()
         
+        # Save figures
         img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
         os.makedirs(img_dir, exist_ok=True)
-        fname = "benchmark_switch_traj_log.pdf" if log_scale else "benchmark_switch_traj.pdf"
-        plt.savefig(os.path.join(img_dir, fname))
-        print(f"Saved plot to {fname}")
+        
+        suffix = "_log" if log_scale else ""
+        save_base = f"benchmark_switch_traj{suffix}"
+        
+        plt.savefig(os.path.join(img_dir, f"{save_base}.pdf"), format='pdf', bbox_inches='tight')
         plt.close()
 
     # Plot Results (RMSE)

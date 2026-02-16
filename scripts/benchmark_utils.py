@@ -6,16 +6,18 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 # --- Plotting Style ---
-def setup_plotting(font_size=15):
-    plt.rcParams['text.usetex'] = True
-    plt.rcParams['font.family'] = 'serif'
-    plt.rcParams['font.serif'] = ['Times New Roman']
-    plt.rcParams['font.size'] = font_size
-    plt.rcParams['axes.labelsize'] = font_size
-    plt.rcParams['xtick.labelsize'] = font_size
-    plt.rcParams['ytick.labelsize'] = font_size
-    plt.rcParams['legend.fontsize'] = font_size
-    plt.rcParams['figure.titlesize'] = font_size
+def setup_plotting(font_size=18):
+    """Setup consistent plotting style for all benchmarks"""
+    plt.rc('font', family='serif', serif='Times')
+    plt.rcParams["text.usetex"] = True
+    plt.rc('text.latex', preamble=r'\usepackage[utf8]{inputenc} \usepackage{amsmath} \usepackage{amsfonts}')
+    plt.rc('xtick', labelsize=font_size)
+    plt.rc('ytick', labelsize=font_size)
+    plt.rc('axes', titlesize=font_size)
+    plt.rc('legend', fontsize=font_size)
+    plt.rc('grid', linestyle='-.', alpha=0.5)
+    plt.rc('axes', grid=True)
+    plt.rcParams['figure.constrained_layout.use'] = True
 
 # --- Configuration Constants ---
 # Assuming this file is in scripts/, so .. is project root

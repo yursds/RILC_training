@@ -8,6 +8,7 @@ from __init__ import *
 import torch
 import mujoco
 from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import functools
 import numpy as np
 from stable_baselines3 import PPO
@@ -311,43 +312,97 @@ if __name__ == '__main__':
 
     # Plotting Helper
     def plot_results(log_scale=False):
-        plt.figure(figsize=(10,6))
+        # Setup plotting style
+        textsize = 18
+        labelsize = 16
+        plt.rc('font', family='serif', serif='Times')
+        plt.rcParams["text.usetex"] = True
+        plt.rc('text.latex', preamble=r'\usepackage[utf8]{inputenc} \usepackage{amsmath} \usepackage{amsfonts}')
+        plt.rc('xtick', labelsize=textsize)
+        plt.rc('ytick', labelsize=textsize)
+        plt.rc('axes', titlesize=textsize)
+        plt.rc('legend', fontsize=textsize)
+        plt.rc('grid', linestyle='-.', alpha=0.5)
+        plt.rc('axes', grid=True)
+        plt.rcParams['figure.constrained_layout.use'] = True
+        
+        # Create figure with 2 subplots (Nominal and Mismatch)
+        fig, axs = plt.subplots(1, 2, figsize=(12, 4), sharex=True, sharey=True)
         
         # Define colors for controllers
+        # colors = {
+        #     "ILC": "tab:orange",
+        #     "NOILC": "tab:blue",
+        #     "RL": "tab:green",
+        #     "RILC": "tab:red",
+        # }
         colors = {
             "ILC": "orange",
             "NOILC": "dodgerblue",
             "RL": "green",
             "RILC": "tomato",
         }
+        # Define linestyles for modes
+        linestyles = {"Nominal": "--", "Mismatch": "-"}
         
-        for ctrl in controllers:
-            color = colors.get(ctrl, "black")
-            for mode_name, is_mismatch, linestyle in modes:
+        # Collect all RMSE values for consistent y-axis
+        all_rmse_values = []
+        
+        for mode_idx, (mode_name, is_mismatch, _) in enumerate(modes):
+            ax = axs[mode_idx]
+            
+            for ctrl in controllers:
                 if mode_name in results[ctrl] and results[ctrl][mode_name]:
-                    label = f"{ctrl} ({mode_name})"
-                    plt.plot(results[ctrl][mode_name], marker='o', linestyle=linestyle, color=color, label=label)
+                    color = colors.get(ctrl, "black")
+                    linestyle = linestyles[mode_name]
+                    rmse_data = results[ctrl][mode_name]
+                    
+                    # Plot line
+                    line, = ax.plot(rmse_data, label=ctrl, linewidth=2, 
+                                   color=color, linestyle=linestyle)
+                    
+                    # Plot markers (hollow circles)
+                    ax.scatter(range(len(rmse_data)), rmse_data, marker='o', 
+                              facecolors='none', edgecolors=color, s=50)
+                    
+                    all_rmse_values.extend(rmse_data)
             
-        from matplotlib.ticker import MaxNLocator
-        plt.title(r"Robustness Benchmark: Nominal (Dashed) vs Mismatch (Solid)")
-        plt.xlabel(r"Episode")
-        plt.ylabel(r"RMSE [rad]")
-        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
-        
-        suffix = ""
-        if log_scale:
-            plt.yscale('log')
-            suffix = "_log"
+            ax.set_xlabel('Episode', fontsize=textsize)
+            if mode_idx == 0:
+                ax.set_ylabel('RMSE [rad]', fontsize=textsize)
             
-        plt.legend()
-        plt.grid(True, which="both", ls="-", alpha=0.5)
+            ax.set_title(mode_name, fontsize=textsize)
+            ax.tick_params(axis='x', labelsize=labelsize)
+            ax.tick_params(axis='y', labelsize=labelsize)
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+            ax.grid(True)
         
+        # Set consistent y-axis limits
+        if all_rmse_values:
+            y_max = max(all_rmse_values)
+            y_min = min(all_rmse_values) if not log_scale else max(min(all_rmse_values), 1e-4)
+            for ax in axs:
+                if log_scale:
+                    ax.set_yscale('log')
+                    ax.set_ylim(y_min * 0.8, y_max * 1.2)
+                else:
+                    ax.set_ylim(0.0, y_max * 1.1)
+        
+        # Create common legend
+        handles, labels = axs[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='upper center', ncol=len(controllers), 
+                  fontsize=textsize, frameon=True)
+        
+        plt.tight_layout(rect=[0, 0, 1, 0.9])
+        
+        # Save figures
         img_dir = os.path.join(os.path.dirname(__file__), '..', 'img')
         os.makedirs(img_dir, exist_ok=True)
         
+        suffix = "_log" if log_scale else ""
         save_base = f"benchmark_mismatch{suffix}"
-        plt.savefig(os.path.join(img_dir, f"{save_base}.pdf"))
-        print(f"Saved plot to {save_base}.pdf")
+        
+        plt.savefig(os.path.join(img_dir, f"{save_base}.pdf"), format='pdf', bbox_inches='tight')
 
     # Plot Linear Scale
     plot_results(log_scale=False)

@@ -41,8 +41,8 @@ lde_cfg = 0.0004
 ldde_cfg = 0.0
 
 # Trajectories
-QF_A = torch.tensor([[2.4], [-1.4]])
-QF_B = torch.tensor([[-1.5], [0.8]]) # New Target
+QF_A = torch.tensor([[2.0], [-1.4]])
+QF_B = torch.tensor([[-2.0], [1.4]]) # New Target
 
 # --- Helper ---
 def plot_action_contributions(traces, episode_idx, alg_name, suffix=""):
@@ -310,7 +310,14 @@ def plot_all_trajectories(all_traces, fresh_trace=None, suffix="", dt=0.01):
         "RILC": "tomato",
         "RL": "purple"
     }
-
+    
+    # Line styles per algorithm to visually distinguish approaches
+    alg_linestyles = {
+        "ILC": "-",    # solid
+        "NOILC": "--", # dashed
+        "RILC": "-.",  # dash-dot
+        "RL": ":"      # dotted
+    }
     # 1. Determine Y-Limits per Joint (Shared Scaling)
     y_lims = [None, None]
     for j in range(2):
@@ -363,7 +370,8 @@ def plot_all_trajectories(all_traces, fresh_trace=None, suffix="", dt=0.01):
                     ref_plotted = True
                     
                 color = alg_colors.get(alg, 'grey')
-                plt.plot(t, q_act, color=color, label=f"{alg}", linewidth=1.5, alpha=0.8)
+                ls = alg_linestyles.get(alg, '-')
+                plt.plot(t, q_act, color=color, linestyle=ls, label=f"{alg}", linewidth=1.5, alpha=0.9)
                 
             # Plot RILC Fresh
             if fresh_trace is not None and ep >= n_ep_initial:
@@ -448,9 +456,13 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
     controller = None
     model_rl = None
     
-    if mode == "RILC" or mode == "RL":
-        print(f"Loading RL model from {MODEL_STR}")
-        model_rl = PPO.load(MODEL_STR)
+    if mode == "RL":
+        print(f"Loading RL model from {MODEL_RL_STR}")
+        model_rl = PPO.load(MODEL_RL_STR)
+    
+    if mode == "RILC":
+        print(f"Loading RILC model from {MODEL_RILC_STR}")
+        model_rl = PPO.load(MODEL_RILC_STR)
 
         
     if mode == "ILC" or mode == "RILC":
@@ -478,7 +490,7 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
         G_mat = construct_lifted_model_linearized_nonlinear(robot, q_traj_ref, dq_traj_ref, u_traj_ref, dt=dt_pol, samples=samples, dimU=njoint, use_analytical=True)
         
         Q_mat = 1.0 * torch.eye(njoint * samples)
-        R_mat = 0.09 * torch.eye(njoint * samples) 
+        R_mat = 0.1 * torch.eye(njoint * samples) 
         controller = NOILC(dimU=njoint, samples=samples, G=G_mat, Q=Q_mat, R=R_mat, threshold=1e-4)
         
         # Initial Guess (Nominal Model for Initial Traj)
@@ -544,7 +556,7 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
         e_ep = []
         t = 0.0
         
-        if hasattr(controller, 'idx'): controller.idx = 0
+        if controller and hasattr(controller, 'idx'): controller.idx = 0
             
         for i in range(samples):
             # Target (Switched)
@@ -588,7 +600,7 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
                     uILC = torch.zeros(2,1)
                     if hasattr(controller, 'idx'): controller.idx += 1
             
-            # 3. RL Control (Only RILC)
+            # 3. RL Control (Only RILC and RL)
             if mode == "RILC" or mode == "RL":
                 t_pol = t + dt_pol
                 if t_pol <= taskT:
@@ -599,11 +611,23 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
                     e_old_ep = e_old_ep_ts[:,:,i]
                     de_old_ep = de_old_ep_ts[:,:,i]
                     
+                    # Per RL puro: azzera osservazioni ILC
+                    if mode == "RL":
+                        uILC_obs = torch.zeros(2,1)
+                        uILC_old_ep_obs = torch.zeros(2,1)
+                        e_old_ep_obs = torch.zeros(2,1)
+                        de_old_ep_obs = torch.zeros(2,1)
+                    else:  # RILC
+                        uILC_obs = uILC
+                        uILC_old_ep_obs = uILC_old_ep
+                        e_old_ep_obs = e_old_ep
+                        de_old_ep_obs = de_old_ep
+                    
                     obs = torch.cat([
                         q_curr.flatten(), dq_curr.flatten(),
                         r_f.flatten(), dr_f.flatten(),
-                        uRL_old.flatten(), uILC.flatten(), uILC_old_ep.flatten(),
-                        e_old_ep.flatten(), de_old_ep.flatten()], dim=0)
+                        uRL_old.flatten(), uILC_obs.flatten(), uILC_old_ep_obs.flatten(),
+                        e_old_ep_obs.flatten(), de_old_ep_obs.flatten()], dim=0)
                     
                     obs_np = env.normalize_obs(obs)
                     url_pred, _ = model_rl.predict(obs_np, deterministic=True)
@@ -674,11 +698,9 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
 
 if __name__ == '__main__':
     # Run Experiments
-    controllers = ["ILC", "NOILC", "RILC"] #, "RL"]
+    controllers = ["ILC", "NOILC", "RILC", "RL"]
     # modes = [("Nominal", False, "--"), ("Mismatch", True, "-")] 
     modes = [("Nominal", False, "--")] # Only Nominal as requested
-    if ("RILC" in controllers or "RL" in controllers) and not os.path.exists(MODEL_STR):
-        print(f"Warning: RL Model {MODEL_STR} not found! RILC/RL will fail or use random.")
     
     # Store traces per mode for comparative plotting
     traces_store = { "Nominal": {}, "Mismatch": {} }
@@ -751,9 +773,10 @@ if __name__ == '__main__':
                 # Offset by n_ep_initial (15)
                 if mode_name in ref_results[ctrl] and ref_results[ctrl][mode_name]:
                     data = ref_results[ctrl][mode_name]
+                    label = f"{ctrl} ({mode_name})"
                     x_axis = np.arange(n_ep_initial, n_ep_initial + len(data))
                     # Use lighter color or dotted line
-                    plt.plot(x_axis, data, linestyle=':', color=color, alpha=0.7)
+                    plt.plot(x_axis, data, linestyle=':', color=color, alpha=0.7, marker='', label=label + " (Ref B)")
 
         plt.title(f"RMSE (" + ("Log Scale" if log_scale else "Linear") + ")")
         plt.xlabel("Episode")

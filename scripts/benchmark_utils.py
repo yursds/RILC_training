@@ -26,9 +26,13 @@ MJC_PATH = os.path.join(CLASSES_PATH, 'robots/robot_models/softleg_urdf/mjc/scen
 
 # RL Model Path
 parent_str = "model"
-dat_str = "rilc_16"
-step_str = "best_model/best_model.zip"
-MODEL_STR = os.path.join(PROJECT_ROOT, parent_str, dat_str, step_str)
+dat_rilc_str = "rilc_16"
+step_rilc_str = "best_model/best_model.zip"
+MODEL_RILC_STR = os.path.join(PROJECT_ROOT, parent_str, dat_rilc_str, step_rilc_str)
+
+dat_rl_str = "rl_classic_64"
+step_rl_str = "best_model/best_model.zip"
+MODEL_RL_STR = os.path.join(PROJECT_ROOT, parent_str, dat_rl_str, step_rl_str)
 
 
 # --- Helper Functions ---

@@ -83,9 +83,13 @@ def run_experiment(mode="ILC", mismatch=False):
     controller = None
     model_rl = None
     
+    if mode == "RL":
+        print(f"Loading RL model from {MODEL_RL_STR}")
+        model_rl = PPO.load(MODEL_RL_STR)
+
     if mode == "RILC":
-        print(f"Loading RL model from {MODEL_STR}")
-        model_rl = PPO.load(MODEL_STR)
+        print(f"Loading RL model from {MODEL_RILC_STR}")
+        model_rl = PPO.load(MODEL_RILC_STR)
 
         
     if mode == "ILC" or mode == "RILC":
@@ -132,7 +136,8 @@ def run_experiment(mode="ILC", mismatch=False):
         if ep == 0:
             pass # Already called newEp
         else:
-            controller.stepILC()
+            if controller:
+                controller.stepILC()
             
         # Reset Env
         mujoco.mj_resetData(model_mj, data_mj)
@@ -155,7 +160,7 @@ def run_experiment(mode="ILC", mismatch=False):
         e_ep = []
         t = 0.0
         
-        if hasattr(controller, 'idx'): controller.idx = 0
+        if controller and hasattr(controller, 'idx'): controller.idx = 0
             
         for i in range(samples):
             # Target
@@ -183,22 +188,25 @@ def run_experiment(mode="ILC", mismatch=False):
             e_ep.append(e_.flatten().clone())
             
             # 1. Update ILC Memory (Error)
-            controller.updateMemError(e_=e_, de_=de_, dde_=dde_)
+            if mode == "ILC" or mode == "RILC" or mode == "NOILC":
+                controller.updateMemError(e_=e_, de_=de_, dde_=dde_)
             
             # 2. Get ILC Control
             if mode == "NOILC":
                  uILC_raw = controller.getControl() 
                  uILC = uILC_raw
-            else:
+            elif mode == "ILC" or mode == "RILC":
                 if ep > 0:
                     uILC_raw = controller.getControl()
                     uILC = uILC_raw
                 else:
                     uILC = torch.zeros(2,1)
                     if hasattr(controller, 'idx'): controller.idx += 1
+            else:  # RL mode
+                uILC = torch.zeros(2,1)
             
-            # 3. RL Control (Only RILC)
-            if mode == "RILC":
+            # 3. RL Control (RILC and RL)
+            if mode == "RILC" or mode == "RL":
                 t_pol = t + dt_pol
                 if t_pol <= taskT:
                     r_f, dr_f, _ = des_traj_at(t=t_pol)
@@ -208,11 +216,23 @@ def run_experiment(mode="ILC", mismatch=False):
                     e_old_ep = e_old_ep_ts[:,:,i]
                     de_old_ep = de_old_ep_ts[:,:,i]
                     
+                    # Per RL puro: azzera osservazioni ILC
+                    if mode == "RL":
+                        uILC_obs = torch.zeros(2,1)
+                        uILC_old_ep_obs = torch.zeros(2,1)
+                        e_old_ep_obs = torch.zeros(2,1)
+                        de_old_ep_obs = torch.zeros(2,1)
+                    else:  # RILC
+                        uILC_obs = uILC
+                        uILC_old_ep_obs = uILC_old_ep
+                        e_old_ep_obs = e_old_ep
+                        de_old_ep_obs = de_old_ep
+                    
                     obs = torch.cat([
                         q_curr.flatten(), dq_curr.flatten(),
                         r_f.flatten(), dr_f.flatten(),
-                        uRL_old.flatten(), uILC.flatten(), uILC_old_ep.flatten(),
-                        e_old_ep.flatten(), de_old_ep.flatten()], dim=0)
+                        uRL_old.flatten(), uILC_obs.flatten(), uILC_old_ep_obs.flatten(),
+                        e_old_ep_obs.flatten(), de_old_ep_obs.flatten()], dim=0)
                     
                     obs_np = env.normalize_obs(obs)
                     url_pred, _ = model_rl.predict(obs_np, deterministic=True)
@@ -261,7 +281,8 @@ def run_experiment(mode="ILC", mismatch=False):
             uILC_old = uILC_interp.clone()
             
             # 5. Update ILC Memory (Input)
-            controller.updateMemInput(uFB + uILC)
+            if mode == "ILC" or mode == "RILC" or mode == "NOILC":
+                controller.updateMemInput(uFB + uILC)
             
         # Ep End
         rmse = torch.sqrt(torch.mean(torch.stack(e_ep)**2)).item()
@@ -272,7 +293,7 @@ def run_experiment(mode="ILC", mismatch=False):
 
 if __name__ == '__main__':
     # Run Experiments
-    controllers = ["ILC", "NOILC", "RILC"]
+    controllers = ["ILC", "NOILC", "RL", "RILC"]
     modes = [("Nominal", False, "--"), ("Mismatch", True, "-")] # Name, mismatch_bool, linestyle
     
     results = {}
@@ -296,8 +317,8 @@ if __name__ == '__main__':
         colors = {
             "ILC": "orange",
             "NOILC": "dodgerblue",
+            "RL": "green",
             "RILC": "tomato",
-
         }
         
         for ctrl in controllers:

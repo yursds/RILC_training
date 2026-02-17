@@ -585,7 +585,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
             # perturb Kp and Kd
             Kp = torch.diag(self.kp*(torch.rand(self.pin_rob._dim_u,)+1))
             Kd = torch.diag(self.kv*(torch.rand(self.pin_rob._dim_u,)+1))
-            self.PD.setParams(Kp=Kp, Kd=Kd)
+            self.PD.setParams(Kp=Kp, Kv=Kd)
         
         obs = self._get_obs(ctrlNew=[mb0, pd0, rl0, ilc0]).numpy()
         info = self.dict0

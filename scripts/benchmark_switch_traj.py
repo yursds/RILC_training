@@ -43,7 +43,10 @@ ldde_cfg = 0.0
 
 # Trajectories
 QF_A = torch.tensor([[2.4], [-1.4]])
-QF_B = torch.tensor([[1.], [-0.5]]) # New Target
+QF_B = torch.tensor([[-1.], [1.]]) # New Target
+
+# Episodes to trace for plotting
+TRACE_EPISODES = [0, n_ep_initial-1, n_ep_initial, n_ep_total-1]
 
 # --- Helper ---
 def plot_action_contributions(traces, episode_idx, alg_name, suffix=""):
@@ -294,13 +297,19 @@ def plot_interaction(traces, episode_idx, alg_name, suffix="", gt_trace=None, ri
     print(f"Saved interaction plot to {save_path}")
     plt.close()
 
-
 def plot_all_trajectories(all_traces, fresh_trace=None, suffix="", dt=0.01):
     """
     Plots comparative trajectories for ILC, NOILC, RILC (and RL).
-    Episodes 0, 14 (Ref A) and 15, 29 (Ref B).
+    Uses global TRACE_EPISODES for episode selection.
     """
-    key_episodes = [0, 14, 15, 29]
+    # Use global TRACE_EPISODES and check availability
+    key_episodes = TRACE_EPISODES[:]
+    if all_traces:
+        # Filter to only available episodes
+        available_eps = set()
+        for alg_traces in all_traces.values():
+            available_eps.update(alg_traces.keys())
+        key_episodes = sorted([ep for ep in key_episodes if ep in available_eps])
     
     # Reduced width as requested
     plt.figure(figsize=(18, 10))
@@ -386,8 +395,8 @@ def plot_all_trajectories(all_traces, fresh_trace=None, suffix="", dt=0.01):
             if j == 1: plt.xlabel("Time [s]")
             if i == 0: plt.ylabel("Angle [rad]")
             
-            if y_lims[j]:
-                plt.ylim(y_lims[j])
+            # if y_lims[j]:
+            #     plt.ylim(y_lims[j])
             
             # Smart Legend Placement - only on first plot of row or outside?
             # User said "in appropriate place". 'best' is usually safest per subplot if not crowded.
@@ -491,7 +500,7 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
         G_mat = construct_lifted_model_linearized_nonlinear(robot, q_traj_ref, dq_traj_ref, u_traj_ref, dt=dt_pol, samples=samples, dimU=njoint, use_analytical=True)
         
         Q_mat = 1.0 * torch.eye(njoint * samples)
-        R_mat = 0.1 * torch.eye(njoint * samples) 
+        R_mat = 0.2 * torch.eye(njoint * samples) 
         controller = NOILC(dimU=njoint, samples=samples, G=G_mat, Q=Q_mat, R=R_mat, threshold=1e-4)
         
         # Initial Guess (Nominal Model for Initial Traj)
@@ -509,10 +518,8 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
     # Main Loop
     rmse_per_ep = []
     
-    # Episodes to trace
-    trace_episodes = [0, n_ep_initial-1, n_ep_initial, total_episodes-1] # First, Last A, Switch, Last
-    # Filter valid episodes 
-    trace_episodes = sorted(list(set([e for e in trace_episodes if e < total_episodes])))
+    # Episodes to trace (using global TRACE_EPISODES)
+    trace_episodes = sorted([ep for ep in TRACE_EPISODES if ep < total_episodes])
     
     traces = {ep_idx: {'uMB': [], 'uFB': [], 'uILC': [], 'uRL': [], 'q': [], 'q_ref': []} for ep_idx in trace_episodes}
 
@@ -585,21 +592,22 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
             e_ep.append(e_.flatten().clone())
             
             # 1. Update ILC Memory (Error)
-            if controller:
+            if mode == "ILC" or mode == "RILC" or mode == "NOILC":
                 controller.updateMemError(e_=e_, de_=de_, dde_=dde_)
             
             # 2. Get ILC Control
             if mode == "NOILC":
-                 uILC = controller.getControl() 
-            elif mode == "RL":
-                 uILC = torch.zeros(2,1)
-                 if controller and hasattr(controller, 'idx'): controller.idx += 1
-            else:
+                 uILC_raw = controller.getControl() 
+                 uILC = uILC_raw
+            elif mode == "ILC" or mode == "RILC":
                 if ep > 0:
-                    uILC = controller.getControl()
-                else: 
+                    uILC_raw = controller.getControl()
+                    uILC = uILC_raw
+                else:
                     uILC = torch.zeros(2,1)
                     if hasattr(controller, 'idx'): controller.idx += 1
+            else:  # RL mode
+                uILC = torch.zeros(2,1)
             
             # 3. RL Control (Only RILC and RL)
             if mode == "RILC" or mode == "RL":
@@ -687,7 +695,7 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
             uILC_old = uILC_interp.clone()
             
             # 5. Update ILC Memory (Input)
-            if controller:
+            if mode == "ILC" or mode == "RILC" or mode == "NOILC":
                 controller.updateMemInput(uFB + uILC)
             
         # Ep End

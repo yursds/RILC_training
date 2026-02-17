@@ -114,7 +114,7 @@ def run_experiment(mode="ILC", mismatch=False):
             
         G_mat = construct_lifted_model_linearized_nonlinear(robot, q_traj_ref, dq_traj_ref, u_traj_ref, dt=dt_pol, samples=samples, dimU=njoint, use_analytical=True)
         Q_mat = 1.0 * torch.eye(njoint * samples)
-        R_mat = 0.09 * torch.eye(njoint * samples) 
+        R_mat = 0.2 * torch.eye(njoint * samples) 
         controller = NOILC(dimU=njoint, samples=samples, G=G_mat, Q=Q_mat, R=R_mat, threshold=1e-4)
         
         # Initial Guess (Nominal Model)

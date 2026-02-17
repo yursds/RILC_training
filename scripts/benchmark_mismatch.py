@@ -41,11 +41,16 @@ ldde_cfg = 0.0
 
 # Trajectory
 QF = torch.tensor([[2.4], [-1.4]])
+# QF = torch.tensor([[1.5], [-0.4]])
 
 
 # --- SIMULATION RUNNER ---
 def run_experiment(mode="ILC", mismatch=False):
     print(f"\n--- Running Experiment: {mode} (Mismatch={mismatch}) ---")
+    try:
+        print(f"Using QF = {QF.flatten().tolist()}")
+    except Exception:
+        pass
     
     # Init Env/Robot
     f_policy = int(f_robot / scaling)
@@ -65,7 +70,8 @@ def run_experiment(mode="ILC", mismatch=False):
         print("Applying 20% Mass/Friction Mismatch...")
         model_mj.body_mass[:] = model_mj.body_mass * 1.2
         # model_mj.dof_frictionloss[:] = model_mj.dof_frictionloss * 1.2
-    
+        # model_mj.body_ipos = model_mj.body_ipos*(1.5)
+
     data_mj = mujoco.MjData(model_mj)
     frame_skip = int((1/f_robot)/model_mj.opt.timestep)
     
@@ -114,7 +120,7 @@ def run_experiment(mode="ILC", mismatch=False):
             
         G_mat = construct_lifted_model_linearized_nonlinear(robot, q_traj_ref, dq_traj_ref, u_traj_ref, dt=dt_pol, samples=samples, dimU=njoint, use_analytical=True)
         Q_mat = 1.0 * torch.eye(njoint * samples)
-        R_mat = 0.2 * torch.eye(njoint * samples) 
+        R_mat = 1.0 * torch.eye(njoint * samples) 
         controller = NOILC(dimU=njoint, samples=samples, G=G_mat, Q=Q_mat, R=R_mat, threshold=1e-4)
         
         # Initial Guess (Nominal Model)

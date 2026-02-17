@@ -43,7 +43,7 @@ ldde_cfg = 0.0
 
 # Trajectories
 QF_A = torch.tensor([[2.4], [-1.4]])
-QF_B = torch.tensor([[-1.], [1.]]) # New Target
+QF_B = torch.tensor([[1.], [1.5]]) # New Target
 
 # Episodes to trace for plotting
 TRACE_EPISODES = [0, n_ep_initial-1, n_ep_initial, n_ep_total-1]
@@ -500,7 +500,7 @@ def run_experiment(mode="ILC", mismatch=False, scenario="switch", gt_trace=None,
         G_mat = construct_lifted_model_linearized_nonlinear(robot, q_traj_ref, dq_traj_ref, u_traj_ref, dt=dt_pol, samples=samples, dimU=njoint, use_analytical=True)
         
         Q_mat = 1.0 * torch.eye(njoint * samples)
-        R_mat = 0.2 * torch.eye(njoint * samples) 
+        R_mat = 1.0 * torch.eye(njoint * samples) 
         controller = NOILC(dimU=njoint, samples=samples, G=G_mat, Q=Q_mat, R=R_mat, threshold=1e-4)
         
         # Initial Guess (Nominal Model for Initial Traj)
@@ -837,7 +837,7 @@ if __name__ == '__main__':
                 ax.set_yscale('log')
                 ax.set_ylim(y_min * 0.8, y_max * 1.2)
             else:
-                ax.set_ylim(0.0, y_max * 1.1)
+                ax.set_ylim(-0.05, y_max * 1.1)
         
         # Add legend
         ax.legend(fontsize=textsize-4, frameon=True, loc='best')

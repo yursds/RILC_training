@@ -8,3 +8,7 @@ __pycache__/
 
 # Output
 img/
+log/
+model/
+
+*pkl

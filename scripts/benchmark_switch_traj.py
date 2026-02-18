@@ -30,8 +30,8 @@ from classes.environments.env_rlilc_mjc import Env_RILC as ENV
 f_robot = 100
 scaling = 2
 taskT = 1.0
-n_ep_initial = 20
-n_ep_switch = 20
+n_ep_initial = 10
+n_ep_switch = 10
 n_ep_total = n_ep_initial + n_ep_switch
 kp = 0.0 # KPI=0 to isolate ILC performance
 kv = 0.25 
@@ -358,8 +358,8 @@ def plot_all_trajectories(all_traces, fresh_trace=None, suffix="", dt=0.01):
         for i, ep in enumerate(key_episodes):
             plt.subplot(2, 4, j*4 + i + 1)
             
-            phase = "Ref A" if ep < n_ep_initial else "Ref B (Switch)"
-            title = f"Joint {j+1}: Ep {ep} ({phase})"
+            phase = "Ref A" if ep < n_ep_initial else "Ref B"
+            title = f"Ep {ep} ({phase})"
             plt.title(title)
             
             ref_plotted = False
@@ -393,10 +393,10 @@ def plot_all_trajectories(all_traces, fresh_trace=None, suffix="", dt=0.01):
                     plt.plot(t, q_fresh, color='magenta', linestyle='-.', label="RILC Fresh", linewidth=1.5, alpha=0.8)
 
             if j == 1: plt.xlabel("Time [s]")
-            if i == 0: plt.ylabel("Angle [rad]")
+            if i == 0: plt.ylabel(f"$y_{j+1}$ [rad]")
             
-            # if y_lims[j]:
-            #     plt.ylim(y_lims[j])
+            if y_lims[j]:
+                plt.ylim(y_lims[j])
             
             # Smart Legend Placement - only on first plot of row or outside?
             # User said "in appropriate place". 'best' is usually safest per subplot if not crowded.
@@ -798,7 +798,7 @@ if __name__ == '__main__':
                 if mode_name in results[ctrl] and results[ctrl][mode_name]:
                     linestyle = linestyles[mode_name]
                     rmse_data = results[ctrl][mode_name]
-                    label = f"{ctrl} ({mode_name})"
+                    label = f"{ctrl}"
                     
                     # Plot line
                     ax.plot(rmse_data, label=label, linewidth=2, 
@@ -817,12 +817,12 @@ if __name__ == '__main__':
                     
                     # Use dotted line for Ref B
                     ax.plot(x_axis, data, linestyle=':', color=color, alpha=0.7, linewidth=2,
-                           label=f"{ctrl} ({mode_name}, Ref B)")
+                           label=f"{ctrl} (Ref B)")
                     ax.scatter(x_axis, data, marker='s', facecolors='none', edgecolors=color, s=40, alpha=0.7)
                     
                     all_rmse_values.extend(data)
         
-        ax.set_xlabel('Episode', fontsize=textsize)
+        ax.set_xlabel('Iteration', fontsize=textsize)
         ax.set_ylabel('RMSE [rad]', fontsize=textsize)
         ax.tick_params(axis='x', labelsize=labelsize)
         ax.tick_params(axis='y', labelsize=labelsize)

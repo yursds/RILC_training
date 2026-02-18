@@ -6,6 +6,9 @@ __pycache__/
 *.pyc
 .venv/
 
+build/
+*.egg-info/
+
 # Output
 img/
 log/

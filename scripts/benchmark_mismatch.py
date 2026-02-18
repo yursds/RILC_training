@@ -45,7 +45,10 @@ QF = torch.tensor([[2.4], [-1.4]])
 
 
 # --- SIMULATION RUNNER ---
-def run_experiment(mode="ILC", mismatch=False):
+def run_experiment(mode="ILC", mismatch=False, n_ep_reset=None):
+    if n_ep_reset is None:
+        n_ep_reset = globals()['n_ep_reset']
+    
     print(f"\n--- Running Experiment: {mode} (Mismatch={mismatch}) ---")
     try:
         print(f"Using QF = {QF.flatten().tolist()}")
@@ -373,7 +376,7 @@ if __name__ == '__main__':
                     
                     all_rmse_values.extend(rmse_data)
             
-            ax.set_xlabel('Episode', fontsize=textsize)
+            ax.set_xlabel('Iteration', fontsize=textsize)
             if mode_idx == 0:
                 ax.set_ylabel('RMSE [rad]', fontsize=textsize)
             

@@ -65,7 +65,7 @@ This update guarantees asymptotic convergence of the tracking error under standa
 We use Proximal Policy Optimization (PPO) to train a stochastic policy $\tilde{u}_\nu(\xi_j)$ parameterized by $\nu$. The policy is updated to maximize a reward function (minimize cost) using the gradient update:
 
 $$
-\nu \leftarrow \nu - \nabla_\nu \hat{\bar{J}}(\cdot, \nu)
+\nu \leftarrow \nu - \nabla_\nu {\bar{J}}(\cdot, \nu)
 $$
 
 The RL agent observes the state $\xi_j(t) = \phi(y_d, y_{j-I}, \bar{u}_{j-I})$ which includes the desired trajectory and past ILC iterations.
@@ -85,21 +85,7 @@ Where:
 - $u_{mb}(t)$: Model-based term (e.g., gravity compensation).
 - $u_{fb}(t)$: Feedback term (e.g., PD controller) for stabilization.
 
-**Algorithm 1: Reinforced Iterative Learning Control**
-
-1.  **Initialize**: Buffers $B_{ILC}, B_{RL}$, Policy $\tilde{u}_\nu$.
-2.  **Loop** (Training/Execution):
-    - Sample a task $y_d$.
-    - **Reset**: $\bar{u}_j \leftarrow \bar{u}_0$.
-    - **Loop** (Iterations $j = 0 \dots N$):
-      - Execute trajectory using $u_j(t)$.
-      - Record data to $B_{ILC}$ and $B_{RL}$.
-      - **Update RL**: $\nu \leftarrow PPO(B_{RL}, \nu)$ (if training).
-      - **Update ILC**: Compute $\bar{u}_{j+1}$ using error $e_j$.
-
-## 5. Other Controllers
-
-### 5.1 Norm Optimal ILC (NOILC)
+## 5. Norm Optimal ILC (NOILC)
 
 Minimizes a quadratic cost function balancing error and input change:
 $$J(u_{j+1}) = e_{j+1}^T Q e_{j+1} + (u_{j+1} - u_j)^T R (u_{j+1} - u_j)$$

@@ -20,7 +20,7 @@ class SoftLeg_RR(Sim_RR):
         """
         abs_path = os.path.dirname(os.path.abspath(__file__))
         urdf_path   = abs_path+"/robot_models/softleg_urdf/urdf/softleg-rlilc.urdf"
-        mesh_dir    = abs_path+"/robot_models/softleg_urdf/meshes"  # Directory contenente le mesh associate al modello 
+        mesh_dir    = abs_path+"/robot_models/softleg_urdf/meshes"  # Directory containing meshes associated with the model
         ee_name     = "contact_joint"
         base_name   = "contact_joint"
         
@@ -62,7 +62,7 @@ class SoftLeg_RR_3D(SimManURDF):
         
         abs_path = os.path.dirname(os.path.abspath(__file__))
         urdf_path   = abs_path+"/robot_models/softleg_urdf/urdf/softleg-rlilc.urdf"
-        mesh_dir    = abs_path+"/robot_models/softleg_urdf/meshes"  # Directory contenente le mesh associate al modello 
+        mesh_dir    = abs_path+"/robot_models/softleg_urdf/meshes"  # Directory containing meshes associated with the model
         ee_name     = "contact_joint"
         base_name   = "contact_joint"
         
@@ -102,7 +102,7 @@ class SoftLeg_RR_disturb(Sim_RR):
 
         """
         urdf_path   = "./robot_models/softleg_urdf/urdf/softleg-rlilc_disturb.urdf" 
-        mesh_dir    = "./robot_models/softleg_urdf/meshes"  # Directory contenente le mesh associate al modello 
+        mesh_dir    = "./robot_models/softleg_urdf/meshes"  # Directory containing meshes associated with the model 
         ee_name     = "contact_joint"
         base_name   = "contact_joint"
         

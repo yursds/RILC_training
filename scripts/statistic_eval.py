@@ -1,3 +1,9 @@
+import os
+import sys
+
+# Add local directory to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from __init__             import *
 from stable_baselines3    import PPO
 from matplotlib           import pyplot as plt
@@ -15,7 +21,7 @@ from classes.environments.env_rlilc_mjc import Env_RILC as ENV
 import functools
 
 
-abs_path  = os.path.join(os.path.dirname((os.path.abspath(__file__))),'classes') # classes_folder
+abs_path  = os.path.join(os.path.dirname((os.path.abspath(__file__))),'..', 'classes') # classes_folder
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
 EP_OVERRIDE = 5
@@ -35,7 +41,7 @@ step_str = "best_model/best_model.zip"
 last_filename = dat_str + f"_{EP_OVERRIDE}ep_random{unique_name}"
 
 print(dat_str)
-model_str = parent_str + "/" + dat_str + "/" + step_str
+model_str = os.path.join(os.path.dirname(__file__), '..', parent_str, dat_str, step_str)
 
 FL_ILC = True
 FL_RL = True
@@ -52,7 +58,7 @@ torch.manual_seed(SEED)
 if RANDOM_QF:
     flat_qf_envs = (torch.rand(2, NUM_SAMPLES)*2-1)*torch.pi
 else:
-    filepath = os.path.join(os.path.dirname((os.path.abspath(__file__))), 'statistic_data/data_mem/qf_visit_training_rilc.pkl')
+    filepath = os.path.join(os.path.dirname((os.path.abspath(__file__))), '..', 'statistic_data/data_mem/qf_visit_training_rilc.pkl')
     with open(filepath, 'rb') as f:
         list_ts = pickle.load(f)
     flat_qf_envs = torch.cat([torch.cat(env_qf,1) for env_qf in list_ts],1)
@@ -95,7 +101,8 @@ if __name__ == '__main__':
     visual = False
     
     # ++++++++++++++++++++++++  init  +++++++++++++++++++++++++++++++++++ 
-    yaml_str        = parent_str+ "/" +dat_str+ "/" +'config.yaml'
+    # ++++++++++++++++++++++++  init  +++++++++++++++++++++++++++++++++++ 
+    yaml_str        = os.path.join(os.path.dirname(__file__), '..', parent_str, dat_str, 'config.yaml')
     config:dict     = load_config(yaml_str)
     taskT: float    = config['taskT']
     n_ep_reset: int = EP_OVERRIDE # config['n_ep_reset']

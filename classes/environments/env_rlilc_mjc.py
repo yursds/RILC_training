@@ -76,25 +76,27 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         ldde : float        = 0.08,
         kp : float          = 0.4,
         kv : float          = 0.25,
+        threshold : float   = 1e-3,
         seed : int          = None,
         dtype : torch.dtype = torch.float32,
         **kwargs,
         ):
         
         """ Args:
-                taskT (float, optional): task duration. Defaults to 1.0.
-                f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation  timestep of dynamic: Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-                scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-                stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-                n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-                le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-                lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-                ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-                kp (float, optional): gain of PD for error. Defaults to 0.04.
-                kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-                relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-                dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-                seed (int, optional): seed use to define trajectories. Defaults to None.
+            taskT (float, optional): task duration. Defaults to 1.0.
+            f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation  timestep of dynamic: Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
+            scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
+            stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
+            n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
+            le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
+            lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
+            ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
+            kp (float, optional): gain of PD for error. Defaults to 0.04.
+            kv (float, optional): gain of PD for dot error. Defaults to 0.025.
+            threshold (float, optional): rmse threshold to stop updating ILC. Defaults to 1e-3.
+            relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
+            dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
+            seed (int, optional): seed use to define trajectories. Defaults to None.
         """
         
         # set seeding
@@ -148,6 +150,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         self.ldde         = ldde
         self.kp           = kp
         self.kv           = kv
+        self.threshold    = threshold
         
         self.samples = int(self.taskT*self.f_policy) + 1
         self.noise_q_dev  = 1e-6
@@ -207,6 +210,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         kp   = self.kp
         kv   = self.kv
         fs_p = self.f_policy
+        threshold = self.threshold
         
         # ILC - NOTE: update with policy rate
         le_ts   = torch.tensor(le * fs_p)
@@ -219,6 +223,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
             Le = le_ts,
             Lde = lde_ts,
             Ldde = ldde_ts,
+            threshold = threshold,
             dtype = self.dtype,)
         
         # PD - NOTE: update with robot rate
@@ -580,7 +585,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
             # perturb Kp and Kd
             Kp = torch.diag(self.kp*(torch.rand(self.pin_rob._dim_u,)+1))
             Kd = torch.diag(self.kv*(torch.rand(self.pin_rob._dim_u,)+1))
-            self.PD.setParams(Kp=Kp, Kd=Kd)
+            self.PD.setParams(Kp=Kp, Kv=Kd)
         
         obs = self._get_obs(ctrlNew=[mb0, pd0, rl0, ilc0]).numpy()
         info = self.dict0
@@ -788,25 +793,27 @@ class Env_RL(Env_RILC):
         ldde : float        = 0.0008,
         kp : float          = 0.04,
         kv : float          = 0.025,
+        threshold : float   = 1e-3,
         seed : int          = None,
         dtype : torch.dtype = torch.float32,
         **kwargs,
         ):
         
         """ Args:
-                taskT (float, optional): task duration. Defaults to 1.0.
-                f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation  timestep of dynamic: Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
-                scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
-                stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
-                n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
-                le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
-                lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
-                ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
-                kp (float, optional): gain of PD for error. Defaults to 0.04.
-                kv (float, optional): gain of PD for dot error. Defaults to 0.025.
-                relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
-                dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
-                seed (int, optional): seed use to define trajectories. Defaults to None.
+            taskT (float, optional): task duration. Defaults to 1.0.
+            f_robot (float, optional): frequency of update of robot dynamics (action dynamic). Defaults to 500. (Different from computation  timestep of dynamic: Mujoco set default timestep to 0.002, you can change in xml option or in self.model.opt.timestep)
+            scaling (int, optional): scaling factor of frequency of update of policy w.r.t. robot frequency. f_robot = f_policy*scaling. Defaults to 10. (choose a sclaling_factor > 1 for smoother behaviour)            
+            stayT (float, optional): time to mantain in last position. Trajectory duration = taskT-stayT. Defaults to 0.0.
+            n_ep_reset (int, optional): consecutive episode with same trajectory. Defaults to 5.
+            le (float, optional): gain of learning in ILC law for error. Defaults to 0.0002.
+            lde (float, optional): gain of learning in ILC law for dot error. Defaults to 0.0004.
+            ldde (float, optional): gain of learning in ILC law for ddot error. Defaults to 0.0008.
+            kp (float, optional): gain of PD for error. Defaults to 0.04.
+            kv (float, optional): gain of PD for dot error. Defaults to 0.025.
+            threshold (float, optional): rmse threshold to stop updating ILC. Defaults to 1e-3.
+            relative_pos (bool, optional): flag to consider the trajectory position respect global position. Defaults to False.
+            dtype (torch.dtype, optional): type of variables. Defaults to torch.float32.
+            seed (int, optional): seed use to define trajectories. Defaults to None.
         """
         
         super().__init__(

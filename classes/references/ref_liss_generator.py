@@ -45,7 +45,7 @@ class LISS_GEN(object):
     @staticmethod
     def _lissajous(t: float) -> np.ndarray:
         """
-        Calcola posizione, velocità e accelerazione in coordinate cartesiane.
+        Compute position, velocity, and acceleration in Cartesian coordinates.
         """
         ny = 3
         nz = 2
@@ -216,14 +216,14 @@ if __name__ == "__main__":
     
     obj = LISS_GEN(taskT=5, f_robot=100)
     
-    # Salva la traiettoria in un file chiamato "traj.pt"
+    # Save the trajectory to a file named "traj.pt"
     obj.save_trajectory(filename=os.path.join(abs_path,"references/traj.pt"))
     
     complete_traj = obj.load_trajectory(filename=os.path.join(abs_path,"references/traj.pt"))
     
-    # Verifica che la traiettoria sia stata caricata correttamente
+    # Verify that the trajectory was loaded correctly
     if complete_traj is not None:
-        print("Test di caricamento riuscito. Shape della traiettoria caricata:", complete_traj.shape)
+        print("Loading test successful. Shape of loaded trajectory:", complete_traj.shape)
         
     
     import matplotlib.pyplot as plt

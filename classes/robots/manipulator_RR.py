@@ -86,7 +86,7 @@ class DoublePendulum(Sim_RR):
         """
         abs_path = os.path.dirname(os.path.abspath(__file__))
         urdf_path   = abs_path+"/robot_models/double_pendulum/urdf/double_pendulum.urdf" 
-        mesh_dir    = abs_path+"/robot_models/double_pendulum/meshes"  # Directory contenente le mesh associate al modello 
+        mesh_dir    = abs_path+"/robot_models/double_pendulum/meshes"  # Directory containing meshes associated with the model 
         ee_name     = "end_effector"
         super().__init__(urdf_path=urdf_path, mesh_dir=mesh_dir, visual=visual, dt = dt, dtype=dtype,ee_name=ee_name)
         

@@ -28,10 +28,10 @@ class RobURDF(RobURDF_ABC):
 
         """
         
-        # 3 casi da implementare
-        # il path è già quello giusto
-        # il path è relativo a questo file
-        # il path è relativo alla directory da dove è stato lanciato il codice
+        # 3 cases to implement
+        # the path is already correct
+        # the path is relative to this file
+        # the path is relative to the directory from where the code was launched
         super().__init__()
         current_folder = os.getcwd() # absolute path of the folder where the code is running.
         #current_file = os.path.abspath(__file__) # absolute path of this file.

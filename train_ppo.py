@@ -1,6 +1,11 @@
 __credits__ = ["Yuri De Santis"]
 # import warnings
 # warnings.filterwarnings("ignore")
+import os
+import sys
+
+# Add local directory to path
+sys.path.append(os.getcwd())
 
 from __init__                               import *
 

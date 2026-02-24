@@ -30,6 +30,8 @@ def load_trajectory(filename: str = 'complete_traj.pt') -> torch.Tensor:
     if os.path.exists(filename):
         complete_traj = torch.load(filename, weights_only=True)
         # print(f"Trajectory loaded from {filename}")
+    else:
+        raise FileNotFoundError(f"Trajectory file not found: {filename}")
     return complete_traj
 
 TRAJ_LISS = load_trajectory(filename=os.path.join(abs_path, "references", "traj_test.pt"))

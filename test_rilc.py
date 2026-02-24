@@ -14,7 +14,6 @@ from classes.environments.env_rlilc_mjc import Env_RILC as ENV
 import functools
 
 
-
 abs_path  = os.path.join(os.path.dirname((os.path.abspath(__file__))),'classes') # classes_folder
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')

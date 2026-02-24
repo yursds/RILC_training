@@ -16,6 +16,7 @@ import functools
 
 abs_path  = os.path.join(os.path.dirname((os.path.abspath(__file__))),'classes') # classes_folder
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
+MESH_DIR  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/meshes')
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
 
 parent_str = "model"
@@ -31,6 +32,7 @@ QF = torch.tensor([[2.4], [-1.4]])
 FL_ILC = True
 FL_RL = True
 OBS_ILC = False
+PLOT = False
 
 if FL_ILC: OBS_ILC = True
 TRAJ = "minjerk" # "minjerk" "lissajous"
@@ -161,7 +163,7 @@ if __name__ == '__main__':
         
     # +++++++++++++++++++ load pin ++++++++++++++++++++++++++++
     
-    robot = Sim_RR(urdf_path=URDF_PATH, ee_name='LH_ANKLE')
+    robot = Sim_RR(urdf_path=URDF_PATH, mesh_dir=MESH_DIR, ee_name='LH_ANKLE')
     tmp_q = des_traj_at(t=0.0)[0].clone()
     tmp_dq = des_traj_at(t=0.0)[1].clone()
     robot.setState(q0=tmp_q, dq0=tmp_dq, q=tmp_q, dq=tmp_dq)
@@ -450,28 +452,21 @@ if __name__ == '__main__':
     
     for i in [0,n_ep_reset-1]:
         plt.figure(figsize=(8, 8))
-        plt.subplot(2,3,1)
+        plt.subplot(2,2,1)
         plt.plot(torch.stack(e_list[i]).T[0,:], label="sim e1")
         plt.plot(torch.stack(e_list[i]).T[1,:], label="sim e2")
         plt.xlabel("Time steps")
         plt.ylabel("Error [$rad$]")
         plt.title(f"Error")
         plt.grid()
-        plt.subplot(2,3,2)
+        plt.subplot(2,2,2)
         plt.plot(torch.stack(de_list[i]).T[0,:], label="sim de1")
         plt.plot(torch.stack(de_list[i]).T[1,:], label="sim de2")
         plt.xlabel("Time steps")
         plt.ylabel("Dot error [$rad/s$]")
         plt.title(f"Dot Error")
         plt.grid()    
-        plt.subplot(2,3,3)
-        plt.plot(torch.stack(dde_list[i]).T[0,:], label="sim dde1")
-        plt.plot(torch.stack(dde_list[i]).T[1,:], label="sim dde2")
-        plt.xlabel("Time steps")
-        plt.ylabel("DDot error [$rad/s^2$]")
-        plt.title(f"DDot Error  ")
-        plt.grid()    
-        plt.subplot(2,3,4)
+        plt.subplot(2,2,3)
         plt.plot(torch.stack(q_list[i]).T[0,:], label="sim q1")
         plt.plot(torch.stack(q_list[i]).T[1,:], label="sim q2")
         plt.plot(r_list[0,:], label="ref q1")
@@ -481,7 +476,7 @@ if __name__ == '__main__':
         plt.legend()
         plt.title(f"Joints' Angle in episode  {i+1}")
         plt.grid()
-        plt.subplot(2,3,5)
+        plt.subplot(2,2,4)
         plt.plot(torch.stack(dq_list[i]).T[0,:], label="sim dq1")
         plt.plot(torch.stack(dq_list[i]).T[1,:], label="sim dq2")
         plt.plot(dr_list[0,:], label="ref dq1")
@@ -491,16 +486,7 @@ if __name__ == '__main__':
         plt.title(f"Joints' Dot Angle")
         plt.grid()
         plt.legend()
-        plt.subplot(2,3,6)
-        plt.plot(torch.stack(ddq_list[i]).T[0,:], label="sim ddq1")
-        plt.plot(torch.stack(ddq_list[i]).T[1,:], label="sim ddq2")
-        plt.plot(ddr_list[0,:], label="ref ddq1")
-        plt.plot(ddr_list[1,:], label="ref ddq2")
-        plt.xlabel("Time steps")
-        plt.ylabel("DDot Angle [$rad/s^2$]")
-        plt.title(f"Joints' DDot Angle")
-        plt.legend()
-        plt.grid()
+
         plt.suptitle(f"ILC in  episode {i+1}")
         plt.tight_layout()
     
@@ -552,17 +538,20 @@ if __name__ == '__main__':
         plt.suptitle(f"ILC Episode {i+1}")
         plt.tight_layout()
         
-    for i in [0, n_ep_reset-1]:
-        plt.figure(figsize=(6,6))
-        plt.title("Check Trajectory")
-        plt.plot([robot.getForwKinEE(r)[0][0] for r in r_list.T], [robot.getForwKinEE(r)[0][1] for r in r_list.T], label="ref traj")
-        plt.plot([robot.getForwKinEE(q)[0][0] for q in q_list[i]], [robot.getForwKinEE(q)[0][1] for q in q_list[i]], label=f"traj_sim ep {i+1}")
-        plt.legend()
-        plt.xlabel("q1 [rad]")
-        plt.ylabel("q2 [rad]")
-        plt.axis('equal')
-        plt.grid()
-    plt.show()
+    if PLOT:
+        for i in [0, n_ep_reset-1]:
+            plt.figure(figsize=(6,6))
+            plt.title("Check Trajectory")
+            plt.plot([robot.getForwKinEE(r)[0][0] for r in r_list.T], [robot.getForwKinEE(r)[0][1] for r in r_list.T], label="ref traj")
+            plt.plot([robot.getForwKinEE(q)[0][0] for q in q_list[i]], [robot.getForwKinEE(q)[0][1] for q in q_list[i]], label=f"traj_sim ep {i+1}")
+            plt.legend()
+            plt.xlabel("q1 [rad]")
+            plt.ylabel("q2 [rad]")
+            plt.axis('equal')
+            plt.grid()
+        plt.show()
+    else:
+        print("Plots generated (in memory), but not shown since PLOT = False.")
     
     if visual:
         mujoco_renderer.close()

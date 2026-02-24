@@ -19,6 +19,7 @@ from gymnasium.envs.mujoco.mujoco_rendering import MujocoRenderer
 # Configuration constants
 abs_path = os.path.join(os.path.dirname((os.path.abspath(__file__))), 'classes')
 URDF_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
+MESH_DIR  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/meshes')
 MJC_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
 
 parent_str = "model"
@@ -27,6 +28,7 @@ dat_str = "rilc_constrained"
 # Trajectory parameters
 QF = torch.tensor([[2.4], [-1.4]])
 TRAJ = "minjerk"
+PLOT = True
 
 # Helper for MinJerk
 def minjerk(qi:torch.Tensor,qf:torch.Tensor,duration:float,t:float) -> list[torch.Tensor,torch.Tensor,torch.Tensor]:
@@ -227,7 +229,7 @@ if __name__ == '__main__':
     dt_rob = 1/f_robot
     
     # Robot
-    robot = Sim_RR(urdf_path=URDF_PATH, ee_name='LH_ANKLE')
+    robot = Sim_RR(urdf_path=URDF_PATH, mesh_dir=MESH_DIR, ee_name='LH_ANKLE')
     
     if TRAJ == "minjerk":
         des_traj_at = functools.partial(minjerk, qi = torch.tensor([[0.0], [0.0]]), qf = QF, duration = taskT)
@@ -421,28 +423,21 @@ if __name__ == '__main__':
     # 2. Detailed Plot First and Last Episode
     for i in [0, n_ep_reset-1]:
         plt.figure(figsize=(8, 8))
-        plt.subplot(2,3,1)
+        plt.subplot(2,2,1)
         plt.plot(torch.stack(e_list[i]).T[0,:], label="sim e1")
         plt.plot(torch.stack(e_list[i]).T[1,:], label="sim e2")
         plt.xlabel("Time steps")
         plt.ylabel("Error [$rad$]")
         plt.title(f"Error")
         plt.grid()
-        plt.subplot(2,3,2)
+        plt.subplot(2,2,2)
         plt.plot(torch.stack(de_list[i]).T[0,:], label="sim de1")
         plt.plot(torch.stack(de_list[i]).T[1,:], label="sim de2")
         plt.xlabel("Time steps")
         plt.ylabel("Dot error [$rad/s$]")
         plt.title(f"Dot Error")
         plt.grid()    
-        plt.subplot(2,3,3)
-        plt.plot(torch.stack(dde_list[i]).T[0,:], label="sim dde1")
-        plt.plot(torch.stack(dde_list[i]).T[1,:], label="sim dde2")
-        plt.xlabel("Time steps")
-        plt.ylabel("DDot error [$rad/s^2$]")
-        plt.title(f"DDot Error  ")
-        plt.grid()    
-        plt.subplot(2,3,4)
+        plt.subplot(2,2,3)
         plt.plot(torch.stack(q_list[i]).T[0,:], label="sim q1")
         plt.plot(torch.stack(q_list[i]).T[1,:], label="sim q2")
         plt.plot(r_list[0,:], label="ref q1")
@@ -452,7 +447,7 @@ if __name__ == '__main__':
         plt.legend()
         plt.title(f"Joints' Angle in episode  {i+1}")
         plt.grid()
-        plt.subplot(2,3,5)
+        plt.subplot(2,2,4)
         plt.plot(torch.stack(dq_list[i]).T[0,:], label="sim dq1")
         plt.plot(torch.stack(dq_list[i]).T[1,:], label="sim dq2")
         plt.plot(dr_list[0,:], label="ref dq1")
@@ -462,19 +457,12 @@ if __name__ == '__main__':
         plt.title(f"Joints' Dot Angle")
         plt.grid()
         plt.legend()
-        plt.subplot(2,3,6)
-        plt.plot(torch.stack(ddq_list[i]).T[0,:], label="sim ddq1")
-        plt.plot(torch.stack(ddq_list[i]).T[1,:], label="sim ddq2")
-        plt.plot(ddr_list[0,:], label="ref ddq1")
-        plt.plot(ddr_list[1,:], label="ref ddq2")
-        plt.xlabel("Time steps")
-        plt.ylabel("DDot Angle [$rad/s^2$]")
-        plt.title(f"Joints' DDot Angle")
-        plt.legend()
-        plt.grid()
+
         plt.suptitle(f"ILC in  episode {i+1}")
         plt.tight_layout()
-        plt.savefig(f"noilc_detailed_ep_{i}.png")
+        if PLOT:
+            plt.savefig(f"noilc_detailed_ep_{i}.png")
+            plt.show()
 
     # 3. Control Components Plot
     for i in [0, n_ep_reset-1]:
@@ -519,6 +507,11 @@ if __name__ == '__main__':
         
         plt.suptitle(f"ILC Episode {i+1}")
         plt.tight_layout()
-        plt.savefig(f"noilc_controls_ep_{i}.png")
+        if PLOT:
+            plt.savefig(f"noilc_controls_ep_{i}.png")
+            plt.show()
         
-    print("All plots saved.")
+    if PLOT:
+        print("All plots saved and shown.")
+    else:
+        print("Plots generated (in memory), but not shown/saved since PLOT = False.")

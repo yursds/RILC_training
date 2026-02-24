@@ -22,6 +22,7 @@ from classes.controllers.pd         import PD_base
 
 abs_path  = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # classes_folder
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
+MESH_DIR  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/meshes')
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
 
 
@@ -198,7 +199,7 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         """ define robot
         """
         # ---------------------------------------- ROBOT ---------------------------------------- #
-        pin_robot = Sim_RR(urdf_path=urdf_path, ee_name='LH_ANKLE')
+        pin_robot = Sim_RR(urdf_path=urdf_path, mesh_dir=MESH_DIR, ee_name='LH_ANKLE')
         # attribute robot
         self.pin_rob = pin_robot
         self.qi = self.pin_rob.q0
@@ -957,7 +958,7 @@ class Env_RILC_LISS(Env_RILC):
         """ define robot
         """
         # ---------------------------------------- ROBOT ---------------------------------------- #
-        pin_robot = Sim_RR(urdf_path=urdf_path, ee_name='LH_ANKLE')
+        pin_robot = Sim_RR(urdf_path=urdf_path, mesh_dir=MESH_DIR, ee_name='LH_ANKLE')
         # attribute robot
         pin_robot.setState(q0=TRAJ_LISS[:2,0].clone(), dq0=TRAJ_LISS[2:4,0].clone())
         self.u0 = pin_robot.getGravity(pin_robot.q0).clone()

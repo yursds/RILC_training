@@ -7,12 +7,10 @@ This document details the mathematical formulation and implementation of the con
 The system is modeled as a 2n-DoFs under-actuated robot with Series Elastic Actuators (SEA). The dynamics are given by [35]:
 
 $$
-\left\{
 \begin{array}{l}
 M(q)\ddot{q} + C(q,\dot{q})\dot{q} + G(q) + K(q-\theta) = 0 \\
 B\ddot{\theta} + D\dot{\theta} - K(q-\theta) = u
 \end{array}
-\right. \quad (1)
 $$
 
 Where:
@@ -33,7 +31,7 @@ $$
 \dot{x}_j = f(x_j) + g(x_j)[\bar{u}_j + \tilde{u}_\nu(\xi_j)] \\
 y_j = h(x_j) \\
 \xi_j = \phi(y_d, y_{j-I}, \bar{u}_{j-I})
-\end{cases} \quad (2)
+\end{cases} 
 $$
 
 Where:

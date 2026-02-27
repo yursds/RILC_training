@@ -1,4 +1,4 @@
-# Reinforced Iterative Learning Control (RILC)
+# Reinforced Iterative Learning Control for Elastic Joint Arms: Guaranteed Cross-Trajectory Generalization under Model Uncertainties
 
 ## Overview
 

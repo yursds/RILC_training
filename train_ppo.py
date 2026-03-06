@@ -4,7 +4,6 @@ __credits__ = ["Yuri De Santis"]
 import os
 import sys
 
-# Add local directory to path
 sys.path.append(os.getcwd())
 
 from __init__                               import *

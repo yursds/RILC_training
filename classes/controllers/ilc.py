@@ -6,7 +6,7 @@ class ILC_base(object):
     """
     This class implements a model free ILC action ONLY for square MIMO.
     NOTE the control law used is:
-    u_{j+1}(k) = u_{j}(k) + Le * e_{j}(k+1) + Ledot * de_{j}(k+1) + Leddot * dde_{j}(k+1)
+    u_{j+1}(k) = u_{j}(k) + Le * e_{j}(k+1) + Lde * de_{j}(k+1) + Ldde * dde_{j}(k+1) + Lddde * ddde_{j}(k+1)
 
     :param dimU: dimension of input vector (single step).
     :type dimU: int
@@ -18,6 +18,8 @@ class ILC_base(object):
     :type Lde: torch.Tensor, optional
     :param Ldde: learning gain scalar for ddot error. Defaults to torch.tensor(0.0).
     :type Ldde: torch.Tensor, optional
+    :param Lddde: learning gain scalar for ddotdot error (3rd derivative). Defaults to torch.tensor(0.0).
+    :type Lddde: torch.Tensor, optional
     :param threshold: rmse threshold to stop updating ILC. Defaults to 1e-3.
     :type threshold: float, optional
     :param dtype: data type. Defaults to torch.float32.
@@ -31,6 +33,7 @@ class ILC_base(object):
         Le: torch.Tensor = torch.tensor(0.01),
         Lde: torch.Tensor = torch.tensor(0.0),
         Ldde: torch.Tensor = torch.tensor(0.0),
+        Lddde: torch.Tensor = torch.tensor(0.0),
         threshold: float = 1e-3,
         dtype: torch.dtype = torch.float32,
     ):
@@ -84,7 +87,14 @@ class ILC_base(object):
                 self.Ldde = Ldde.type(self.dtype)
             else:
                 ValueError("Size error")
-    
+        if Lddde.flatten().size(0) == 1:
+            self.Lddde = Lddde.expand(self.dimU, 1)
+        else:
+            if Lddde.size(0) == self.dimU:
+                self.Lddde = Lddde.type(self.dtype)
+            else:
+                ValueError("Size error")
+        
         self.uEp = torch.zeros(dimU, samples).type(self.dtype)  # control inputs for current episode
         self.uk = torch.zeros(dimU, 1).type(self.dtype)  # current control input
         self.ek = torch.zeros(dimU, 1).type(self.dtype)  # current error
@@ -97,6 +107,7 @@ class ILC_base(object):
             'error': torch.Tensor(),
             'dot_error': torch.Tensor(),
             'ddot_error': torch.Tensor(),
+            'dddot_error': torch.Tensor(),
             'input': torch.Tensor(),
         }, batch_size=[])
     
@@ -128,7 +139,7 @@ class ILC_base(object):
         e_: torch.Tensor = self.mem[-1]["error"]
         self.rmse = torch.sqrt(torch.mean(e_ ** 2))
     
-    def updateMemError(self, e_: torch.Tensor, de_: torch.Tensor = None, dde_: torch.Tensor = None) -> None:
+    def updateMemError(self, e_: torch.Tensor, de_: torch.Tensor = None, dde_: torch.Tensor = None, ddde_: torch.Tensor = None) -> None:
         """
         Store new error, dot error, ddot error in a tensordict in a list, used in control law.
         
@@ -138,17 +149,22 @@ class ILC_base(object):
         :type de_: torch.Tensor, optional
         :param dde_: ddot error as column vector. If None is set to zeros.
         :type dde_: torch.Tensor, optional
+        :param ddde_: ddotdot error (3rd derivative) as column vector. If None is set to zeros.
+        :type ddde_: torch.Tensor, optional
         """
         
         if de_ is None:
             de_ = torch.zeros((self.dimU, 1), dtype=self.dtype)
         if dde_ is None:
             dde_ = torch.zeros((self.dimU, 1), dtype=self.dtype)
+        if ddde_ is None:
+            ddde_ = torch.zeros((self.dimU, 1), dtype=self.dtype)
         
-        str_list = ['error', 'dot_error', 'ddot_error']
+        str_list = ['error', 'dot_error', 'ddot_error', 'dddot_error']
         self.__updateMem(e_, str_list[0])
         self.__updateMem(de_, str_list[1])
         self.__updateMem(dde_, str_list[2])
+        self.__updateMem(ddde_, str_list[3])
     
     def updateMemInput(self, u_: torch.Tensor) -> None:
         """
@@ -212,7 +228,7 @@ class ILC_base(object):
         Update control to use in this episode.
         Start new episode.
         NOTE the control law used is:
-        u_{j+1} = u_{j} + Le * e_{j} + Ledot * de_{j} + Leddot * dde_{j}
+        u_{j+1} = u_{j} + Le * e_{j} + Lde * de_{j} + Ldde * dde_{j} + Lddde * ddde_{j}
         """
         
         if len(self.mem) == 0:
@@ -221,11 +237,13 @@ class ILC_base(object):
         Le = self.Le
         Lde = self.Lde
         Ldde = self.Ldde
+        Lddde = self.Lddde
         
         u_old: torch.Tensor = self.mem[-1]["input"]
         e_old: torch.Tensor = self.mem[-1]["error"]
         de_old: torch.Tensor = self.mem[-1]["dot_error"]
         dde_old: torch.Tensor = self.mem[-1]["ddot_error"]
+        ddde_old: torch.Tensor = self.mem[-1]["dddot_error"]
         
         self.__computeRMSE()
         
@@ -234,7 +252,8 @@ class ILC_base(object):
             self.best_u = u_old \
                 + torch.einsum("ij,ik->ik", Le, e_old) \
                 + torch.einsum("ij,ik->ik", Lde, de_old) \
-                + torch.einsum("ij,ik->ik", Ldde, dde_old)
+                + torch.einsum("ij,ik->ik", Ldde, dde_old) \
+                + torch.einsum("ij,ik->ik", Lddde, ddde_old)
         else:
             if not self.done:
                 self.done = True

@@ -23,7 +23,7 @@ from classes.controllers.pd         import PD_base
 abs_path  = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # classes_folder
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MESH_DIR  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/meshes')
-MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/leg_constrained_elastic.xml')
+MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_elastic.xml')
 
 
 def load_trajectory(filename: str = 'complete_traj.pt') -> torch.Tensor:
@@ -203,6 +203,11 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         # attribute robot
         self.pin_rob = pin_robot
         self.qi = self.pin_rob.q0
+        # Elastic robot: MuJoCo has 4 DOFs [theta_hip, q_hip, theta_knee, q_knee]
+        # init_qpos: theta = qi (motor position), deflection = 0
+        qi_np = self.qi.flatten().numpy()
+        self.init_qpos = np.array([qi_np[0], 0.0, qi_np[1], 0.0])
+        self.init_qvel = np.zeros(4)
     
     def _load_controllers(self):
         """ load controllers, ILC and PD """
@@ -244,13 +249,13 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         q_min    = rob._q_m
         dq_max   = torch.tensor([[50, 50]]).T
         dq_min   = -dq_max
-        u_max    = torch.tensor([[5, 5]]).T
+        u_max    = torch.tensor([[7, 7]]).T
         u_min    = -u_max
         
         # ------------------- define limits - NOT SCALED (TORCH) -------------------------- #
         # action
-        self.lowLimA    = -torch.tensor([[2, 2]]).flatten()
-        self.highLimA   = torch.tensor([[2, 2]]).flatten()
+        self.lowLimA    = -torch.tensor([[5, 5]]).flatten()
+        self.highLimA   = torch.tensor([[5, 5]]).flatten()
         # self.lowLimA    = -torch.tensor([[5, 5]]).flatten()
         # self.highLimA   = torch.tensor([[5, 5]]).flatten()
         # observation -> [q dq]  [ref dref] [uRLold] [uILC uILColdep] [eoldep deoldep]
@@ -635,17 +640,36 @@ class Env_RILC(MujocoEnv, utils.EzPickle):
         return obs_scaled
 
     def _get_state(self) -> list[torch.Tensor, torch.Tensor]:
-        
-        # self.data.joint("HIP").qpos
-        # self.data.sensordata
-        q     = torch.zeros(self.pin_rob._dim_q,1)
-        dq    = torch.zeros(self.pin_rob._dim_q,1)
-        q[0]  = torch.from_numpy(self.data.sensor("q_hip").data)
-        q[1]  = torch.from_numpy(self.data.sensor("q_knee").data)
-        dq[0] = torch.from_numpy(self.data.sensor("dq_hip").data)
-        dq[1] = torch.from_numpy(self.data.sensor("dq_knee").data)
+
+        # theta = motor-side position (theta_hip, theta_knee sensors)
+        theta = torch.zeros(self.pin_rob._dim_q, 1)
+        theta[0] = torch.from_numpy(self.data.sensor("theta_hip").data)
+        theta[1] = torch.from_numpy(self.data.sensor("theta_knee").data)
+
+        # deflection = spring deformation (q_hip, q_knee sensors measure deflection from equilibrium)
+        deflection = torch.zeros(self.pin_rob._dim_q, 1)
+        deflection[0] = torch.from_numpy(self.data.sensor("q_hip").data)
+        deflection[1] = torch.from_numpy(self.data.sensor("q_knee").data)
+
+        # q = link-side position = motor position + deflection
+        q = theta + deflection
+
+        # dtheta = motor-side velocity
+        dtheta = torch.zeros(self.pin_rob._dim_q, 1)
+        dtheta[0] = torch.from_numpy(self.data.sensor("dtheta_hip").data)
+        dtheta[1] = torch.from_numpy(self.data.sensor("dtheta_knee").data)
+
+        # dq_raw = deflection velocity
+        dq_raw = torch.zeros(self.pin_rob._dim_q, 1)
+        dq_raw[0] = torch.from_numpy(self.data.sensor("dq_hip").data)
+        dq_raw[1] = torch.from_numpy(self.data.sensor("dq_knee").data)
+
+        # dq = link-side velocity = motor velocity + deflection velocity
+        dq = dtheta + dq_raw
+
         q    += self.noise_q_dev * torch.randn(2,1)
         dq   += self.noise_dq_dev * torch.randn(2,1)
+
         return q, dq
     
     def rescale_action(self, u_np:np.ndarray) -> torch.Tensor:

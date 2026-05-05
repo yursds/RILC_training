@@ -59,3 +59,31 @@ rl_constrained :
   <<: *constrained_task
   env_id   : 'Env_RL_RANGE'
 
+elastic_constrained_task : &elastic_constrained_task
+  <<: *constrained_task
+  env_id   : 'Env_RILC_RANGE_el'
+  info     : '
+        self.q_range_task = torch.tensor(torch.pi/3)
+        rand_number = torch.rand(2,1)*2-1
+        self.delta_q_task = torch.tensor([[torch.pi/2],[0]])
+        self.qf = self.q_range_task*rand_number + self.delta_q_task
+        for traj with minjerk - elastic'
+  # le         : 0.0009
+  # lde        : 0.0002
+  # ldde       : 0.0
+  # kp         : 0.5
+  # kv         : 0.4
+  kp: 1.0
+  kv: 0.25
+  le: 3.3e-05
+  lde: 3.95e-05
+  ldde: 2.28e-07
+  lddde: 4.5e-07
+
+rilc_elastic_constrained :
+  <<: *elastic_constrained_task
+
+rl_elastic_constrained :
+  <<: *elastic_constrained_task
+  env_id   : 'Env_RL_RANGE_el'
+

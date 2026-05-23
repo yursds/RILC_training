@@ -4,23 +4,24 @@ from matplotlib           import pyplot as plt
 
 import torch
 import mujoco
+import numpy as np
 
 from classes.controllers.ilc        import ILC_base
 from classes.controllers.pd         import PD_base
 from classes.robots.manipulator_RR  import Sim_RR
 
 from gymnasium.envs.mujoco.mujoco_rendering import MujocoRenderer
-from classes.environments.env_rlilc_mjc import Env_RILC as ENV
+from classes.environments.env_rlilc_elastic import Env_RILC as ENV
 import functools
 
 
 abs_path  = os.path.join(os.path.dirname((os.path.abspath(__file__))),'classes') # classes_folder
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MESH_DIR  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/meshes')
-MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
+MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_elastic.xml')
 
 parent_str = "model"
-dat_str = "rilc_constrained" # "rilc" "rl_classic" "rilc_constrained"
+dat_str = "rilc_sea_05"
 step_str = "best_model/best_model.zip"
 
 print(dat_str)
@@ -29,14 +30,14 @@ model_str = parent_str + "/" + dat_str + "/" + step_str
 QF = torch.tensor([[torch.pi/3], [torch.pi/3]])
 # QF = torch.tensor([[-2.232461929321289], [-3.069495677947998]])
 QF = torch.tensor([[2.4], [-1.4]])
-
+# QF = torch.tensor([[0.75], [0.75]])
 FL_ILC = True
 FL_RL = True
-OBS_ILC = False
+OBS_ILC = True
 PLOT = True
 
 if FL_ILC: OBS_ILC = True
-TRAJ = "minjerk" # "minjerk" "lissajous"
+TRAJ = "minjerk"
 
 
 def custom_lissajous_at(t:float, complete_traj: torch.Tensor, dt:float) -> list[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -102,7 +103,7 @@ if __name__ == '__main__':
     yaml_str        = parent_str+ "/" +dat_str+ "/" +'config.yaml'
     config:dict     = load_config(yaml_str)
     taskT: float    = config['taskT']
-    n_ep_reset: int = config['n_ep_reset']
+    n_ep_reset: int = config['n_ep_reset']*3
     scaling: int    = config['scaling']
     f_robot: int    = config['f_robot']
     le: float       = config['le']
@@ -150,7 +151,7 @@ if __name__ == '__main__':
     de_old_ep_ts = torch.zeros(njoint,1,samples)
     
     # +++++++++++++++++ init traj ++++++++++++++++++++++++++++
-    
+
     if TRAJ == "minjerk":
         des_traj_at = functools.partial(minjerk, qi = torch.tensor([[0.0], [0.0]]), qf = QF, duration = taskT)
     elif TRAJ == "lissajous":
@@ -171,21 +172,30 @@ if __name__ == '__main__':
     robot.u0 = robot.getGravity(robot.q0).clone()
     qi = robot.q0.clone()
     dqi = robot.dq0.clone()
-    qpos_init = robot.q0.flatten().numpy().copy()
-    qvel_init = robot.dq0.flatten().numpy().copy()
+    
+    # MuJoCo has 4 DOFs (theta_hip, q_hip, theta_knee, q_knee)
+    # Order: theta_hip, q_hip, theta_knee, q_knee
+    qi_np = robot.q0.flatten().numpy()
+    qpos_init = np.array([qi_np[0], qi_np[0], qi_np[1], qi_np[1]])  # [theta_hip, q_hip, theta_knee, q_knee]
+    dqi_np = robot.dq0.flatten().numpy()
+    qvel_init = np.array([dqi_np[0], dqi_np[0], dqi_np[1], dqi_np[1]])
     
     # +++++++++++++++++ load ctrl ++++++++++++++++++++++++++++
-    
-    ldde = torch.tensor(ldde*f_policy)
-    lde  = torch.tensor(lde*f_policy)
-    le   = torch.tensor(le*f_policy)
+
+    # scale gains for policy frequency (f_policy = 50Hz)
+    # Use gains already scaled (from optimize_gains output)
+    le = torch.tensor(le * f_policy)
+    lde = torch.tensor(lde * f_policy)
+    ldde = torch.tensor(ldde * f_policy)
+    lddde = torch.tensor(0.0 * f_policy)
     
     conILC = ILC_base(
         dimU=njoint, 
         samples=samples, 
         Le = le, 
         Lde = lde, 
-        Ldde = ldde)
+        Ldde = ldde,
+        Lddde = lddde)
     conILC.newEp()
     
     PD = PD_base(
@@ -193,10 +203,10 @@ if __name__ == '__main__':
         kp      = kp,
         kv      = kv,
     )
-    
+
     # ++++++++++++++++++ load policy ++++++++++++++++++++++++++++
-    
-    model_rl = PPO.load(model_str, device="cpu")
+
+    model_rl = PPO.load(model_str)
     
     # ++++++++++++++++++++++ reset ++++++++++++++++++++++++++++++++++++++++++
     
@@ -207,13 +217,11 @@ if __name__ == '__main__':
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
 
-    # qpos_init = data.qpos # !!!!
-    # qvel_init = data.qvel 
     data.qpos = qpos_init
     data.qvel = qvel_init
     mujoco.mj_inverse(model, data)
     joint_forces = torch.from_numpy(data.qfrc_inverse).clone()
-    data.ctrl[:] = joint_forces #robot.getGravity(q=qi).flatten()
+    data.ctrl[:] = joint_forces[:2]  # only motor-side (theta) joints
     mujoco.mj_forward(model, data)
     
     conILC.resetAll()
@@ -224,8 +232,10 @@ if __name__ == '__main__':
     # init vars
     q     = qi.clone().view(2,1)
     dq    = dqi.clone().view(2,1)
-    ddq    = torch.zeros(2,1)
+    ddq   = torch.zeros(2,1)
     dq_old  = dq.clone()
+    theta   = torch.zeros(2,1)
+    dtheta  = torch.zeros(2,1)
     
     d = torch.rand(2,samples,n_ep_reset)*0.5*0
         
@@ -236,9 +246,15 @@ if __name__ == '__main__':
     uMB_list = []
     uILC_list= []
     uFB_list = []
+    
+    # q = link-side positions
     q_list   = []
     dq_list  = []
     ddq_list = []
+    
+    # theta = motor-side positions
+    theta_list   = []
+    dtheta_list = []
     
     r_list = torch.zeros(2,samples)
     dr_list = torch.zeros(2,samples)
@@ -255,6 +271,7 @@ if __name__ == '__main__':
     for ep in range(n_ep_reset):
         
         t = 0.0
+        dde_old = torch.zeros(2, 1)
         
         if conILC.episodes == 0:
             conILC.newEp()
@@ -276,61 +293,75 @@ if __name__ == '__main__':
         joint_forces = torch.from_numpy(data.qfrc_inverse).clone()
         data.ctrl[:] = robot.getGravity(q=qi).flatten()
         mujoco.mj_forward(model, data)
-        dq_old = torch.as_tensor(data.qvel).view(2,1).clone()
+        # dq_old = dq.clone()
+        dq_old = dq.clone()
         
         e_tmp       = []
         de_tmp      = []
         dde_tmp     = []
+        
+        # link-side
         q_tmp       = []
         dq_tmp      = []
         ddq_tmp     = []
+        
+        # motor-side
+        theta_tmp   = []
+        dtheta_tmp = []
+        
         uRL_tmp     = []
         uMB_tmp     = []
         uILC_tmp    = []
         uFB_tmp     = []
         
         for i in range(samples):
-            # r_, dr_, ddr_ = minjerk(qi = qi, qf = qf, duration = taskT, t = t)
             r_, dr_, ddr_ = des_traj_at(t=t)
             
-            q[0]   = torch.from_numpy(data.sensor("q_hip").data)
-            q[1]   = torch.from_numpy(data.sensor("q_knee").data)
-            dq[0]  = torch.from_numpy(data.sensor("dq_hip").data)
-            dq[1]  = torch.from_numpy(data.sensor("dq_knee").data)
+            # LINK-SIDE (q) - q_hip sensor measures deflection from equilibrium
+            deflection = torch.zeros(2,1)
+            dq_raw = torch.zeros(2,1)
+            theta_sample = torch.zeros(2,1)
+            theta_sample[0]  = torch.from_numpy(data.sensor("theta_hip").data)
+            theta_sample[1]  = torch.from_numpy(data.sensor("theta_knee").data)
+            deflection[0]  = torch.from_numpy(data.sensor("q_hip").data)
+            deflection[1]  = torch.from_numpy(data.sensor("q_knee").data)
+            dq_raw[0] = torch.from_numpy(data.sensor("dq_hip").data)
+            dq_raw[1] = torch.from_numpy(data.sensor("dq_knee").data)
+            q    = theta_sample + deflection
+            dq   = torch.zeros(2,1)
             q    += noise_q_dev * torch.randn(2,1)
             dq   += noise_dq_dev * torch.randn(2,1)
             ddq   = (dq-dq_old)*f_robot
-            
-            # print(f'q:{q.flatten()}')
-            # print(f'dq:{dq.flatten()}')
-            # print(f'ddq:{ddq.flatten()}')
-            
+        
             e_    = r_ - q
             e_    = angle_normalize(e_)
             de_   = dr_ - dq
             dde_  = ddr_ - ddq
+            # 3rd derivative of error
+            if scaling > 1:
+                dt = dt_pol
+                ddde_ = (dde_ - dde_old) * f_robot
+                dde_old = dde_.clone()
+            else:
+                ddde_ = torch.zeros(2, 1)
             
             e_tmp.append(e_.flatten().clone())
             de_tmp.append(de_.flatten().clone())
             dde_tmp.append(dde_.flatten().clone())
+
+            # q_tmp.append(q.flatten().clone())
+            # dq_tmp.append(dq.flatten().clone())
+            # ddq_tmp.append(ddq.flatten().clone())
             
             q_old = robot.q.clone()
             robot.setState(q=q, dq=dq)
             
-            # Update useful memory of ILC
-            # iM       = robot.getInvMass(q=q_old)
-            # u_delta  = torch.matmul(iM, uFB+uILC)
             u_delta = uFB+uILC
-            # update ERROR memory of ILC
-            conILC.updateMemError(e_=e_,de_=de_,dde_=dde_)
-            # update INPUT memory of ILC
+            conILC.updateMemError(e_=e_,de_=de_,dde_=dde_,ddde_=ddde_)
             conILC.updateMemInput(u_delta)
             
-            # get new control of ILC
             if conILC.episodes != 0 and FL_ILC:
                 uilc = conILC.getControl()
-                # M    = robot.getMass(q=q)
-                # uILC = torch.matmul(M,uilc)
                 uILC = uilc
             else:
                 uILC = torch.zeros(2,1)
@@ -343,7 +374,6 @@ if __name__ == '__main__':
             t_pol = t + dt_pol
             
             if t_pol <= taskT:
-                # r_f, dr_f, ddr_f = minjerk(qi = qi, qf = qf, duration = taskT, t = t_pol)
                 r_f, dr_f, ddr_f = des_traj_at(t=t_pol)
 
                 uRL_old_ep  = uRL_old_ep_ts[:,:,i]
@@ -369,7 +399,6 @@ if __name__ == '__main__':
 
                 url, _ = model_rl.predict(obs_np, deterministic=True)
                 uRL    = env.rescale_action(url).view(-1,1) if FL_RL else torch.zeros(2,1)
-                # uRL = (torch.rand(2,1)*2-1)*2
                 uRL_old_ep_ts[:, :, i] = uRL.clone()
                 uILC_old_ep_ts[:, :, i] = uILC.clone()
                 uFB_old_ep_ts[:, :, i] = uFB.clone()
@@ -378,48 +407,63 @@ if __name__ == '__main__':
             
             for _ in range(scaling):
                 
-                # r_, dr_, ddr_ = minjerk(qi = qi, qf = qf, duration = taskT, t = t)
                 r_, dr_, ddr_ = des_traj_at(t=t)
 
-                # get state
-                q[0]  = torch.from_numpy(data.sensor("q_hip").data)
-                q[1]  = torch.from_numpy(data.sensor("q_knee").data)
-                dq[0] = torch.from_numpy(data.sensor("dq_hip").data)
-                dq[1] = torch.from_numpy(data.sensor("dq_knee").data)
+                # LINK-SIDE (q) - q_hip sensor measures deflection from equilibrium, not absolute position
+                # Actual link position = theta - deflection
+                deflection[0] = torch.from_numpy(data.sensor("q_hip").data)
+                deflection[1] = torch.from_numpy(data.sensor("q_knee").data)
+                dq_raw[0]     = torch.from_numpy(data.sensor("dq_hip").data)
+                dq_raw[1]     = torch.from_numpy(data.sensor("dq_knee").data)
+                
+                # Compute actual link position from motor + deflection
+                q    = theta + deflection
+                dq   = dtheta + dq_raw
                 q    += noise_q_dev * torch.randn(2,1)
                 dq   += noise_dq_dev * torch.randn(2,1)
                 ddq   = (dq-dq_old)*f_robot
                 dq_old = dq.clone()
+                
+                # MOTOR-SIDE (theta) - NEW for SEA
+                theta[0]  = torch.from_numpy(data.sensor("theta_hip").data)
+                theta[1]  = torch.from_numpy(data.sensor("theta_knee").data)
+                dtheta[0] = torch.from_numpy(data.sensor("dtheta_hip").data)
+                dtheta[1] = torch.from_numpy(data.sensor("dtheta_knee").data)
                 
                 e_    = r_ - q
                 e_    = angle_normalize(e_)
                 de_   = dr_ - dq
                 dde_  = ddr_ - ddq
                 
-                # update interpolation of law rate commands
                 uRL_interp  = (uRL_old + duRL).clone()
                 uILC_interp = (uILC_old + duILC).clone()
                 uRL_old     = uRL_interp.clone()
                 uILC_old    = uILC_interp.clone()
                 
-                # ---------------- MB control - compensate g and simplify dynamics ----------------------#
                 G      = robot.getGravity(q=q)
                 uMB = G
-                # ------------------------------ PD control ---------------------------------------------#
                 uFB = torch.matmul(torch.diag(torch.tensor([kp, kp])),e_) \
                     + torch.matmul(torch.diag(torch.tensor([kv, kv])),de_)
                 
                 uTot = uMB + uFB + uRL_interp + uILC_interp + d[:,i,ep].reshape(2,1)
                 
-                data.ctrl[:] = uTot.flatten().numpy()
+                data.ctrl[:2] = uTot.flatten().numpy()
                 mujoco.mj_step(model, data, nstep=frame_skip)
                 mujoco.mj_rnePostConstraint(model, data)
                 
-                t += dt_rob
+                # # append sensor data
+                # theta_tmp.append(theta.flatten().clone())
+                # dtheta_tmp.append(dtheta.flatten().clone())
                 
+                t += dt_rob
+
             if visual:
                 mujoco_renderer.render("human")
-            
+
+
+            # append sensor data
+            theta_tmp.append(theta.flatten().clone())
+            dtheta_tmp.append(dtheta.flatten().clone())
             # update partial logging
             q_tmp.append(q.flatten().clone())
             dq_tmp.append(dq.flatten().clone())
@@ -428,19 +472,20 @@ if __name__ == '__main__':
             uILC_tmp.append(uILC_interp.flatten().clone())
             uFB_tmp.append(uFB.flatten().clone())
             uRL_tmp.append(uRL_interp.flatten().clone())
-        
-        # update complete logging
+
         e_list.append(e_tmp)
         de_list.append(de_tmp)
         dde_list.append(dde_tmp)
         q_list.append(q_tmp)
         dq_list.append(dq_tmp)
         ddq_list.append(ddq_tmp)
+        theta_list.append(theta_tmp)
+        dtheta_list.append(dtheta_tmp)
         uRL_list.append(uRL_tmp)
         uMB_list.append(uMB_tmp)
         uILC_list.append(uILC_tmp)
         uFB_list.append(uFB_tmp)
-        
+         
     for i in range(len(e_list)):
         rmse_list = torch.sqrt(torch.mean(torch.stack(e_list[i])**2))
         print(f"rilc MSE of episode: {i}", rmse_list)
@@ -450,6 +495,8 @@ if __name__ == '__main__':
     for i in range(len(e_list)):
         rmse_uILC = torch.sqrt(torch.mean(torch.stack(uILC_list[i])**2))
         print(f"rilc MS_uILC of episode: {i}", rmse_uILC)
+    
+    # +++++++++++++++++++++++++++ SAME PLOTS AS test_rilc.py +++++++++++++++++++++++++++
     
     for i in [0,n_ep_reset-1]:
         plt.figure(figsize=(8, 8))
@@ -466,7 +513,7 @@ if __name__ == '__main__':
         plt.xlabel("Time steps")
         plt.ylabel("Dot error [$rad/s$]")
         plt.title(f"Dot Error")
-        plt.grid()    
+        plt.grid()
         plt.subplot(2,2,3)
         plt.plot(torch.stack(q_list[i]).T[0,:], label="sim q1")
         plt.plot(torch.stack(q_list[i]).T[1,:], label="sim q2")
@@ -475,7 +522,7 @@ if __name__ == '__main__':
         plt.xlabel("Time steps")
         plt.ylabel("Angle [$rad$]")
         plt.legend()
-        plt.title(f"Joints' Angle in episode  {i+1}")
+        plt.title(f"Link-side Joints' Angle in episode {i+1}")
         plt.grid()
         plt.subplot(2,2,4)
         plt.plot(torch.stack(dq_list[i]).T[0,:], label="sim dq1")
@@ -484,12 +531,14 @@ if __name__ == '__main__':
         plt.plot(dr_list[1,:], label="ref dq2")
         plt.xlabel("Time steps")
         plt.ylabel("Dot Angle [$rad/s$]")
-        plt.title(f"Joints' Dot Angle")
+        plt.title(f"Link-side Joints' Dot Angle")
         plt.grid()
         plt.legend()
 
-        plt.suptitle(f"ILC in  episode {i+1}")
+        plt.suptitle(f"ILC in episode {i+1}")
         plt.tight_layout()
+    
+    # +++++++++++++++++++++++++++ CONTROL SIGNAL PLOTS +++++++++++++++++++++++++++
     
     for i in [0,n_ep_reset-1]:
         plt.figure(figsize=(15, 3))
@@ -538,22 +587,80 @@ if __name__ == '__main__':
         
         plt.suptitle(f"ILC Episode {i+1}")
         plt.tight_layout()
-        
+    
+    # +++++++++++++++++++++++++++ SEA-SPECIFIC PLOTS +++++++++++++++++++++++++++
+    
     if PLOT:
-        for i in [0, n_ep_reset-1]:
-            plt.figure(figsize=(6,6))
-            plt.title("Check Trajectory")
-            plt.plot([robot.getForwKinEE(r)[0][0] for r in r_list.T], [robot.getForwKinEE(r)[0][1] for r in r_list.T], label="ref traj")
-            plt.plot([robot.getForwKinEE(q)[0][0] for q in q_list[i]], [robot.getForwKinEE(q)[0][1] for q in q_list[i]], label=f"traj_sim ep {i+1}")
-            plt.legend()
-            plt.xlabel("q1 [rad]")
-            plt.ylabel("q2 [rad]")
-            plt.axis('equal')
+        # Plots with theta and q
+        for i in [0,n_ep_reset-1]:
+            plt.figure(figsize=(12, 8))
+            
+            plt.subplot(2,3,1)
+            plt.plot(torch.stack(e_list[i]).T[0,:], label="e1")
+            plt.plot(torch.stack(e_list[i]).T[1,:], label="e2")
+            plt.xlabel("Time steps")
+            plt.ylabel("Error [rad]")
+            plt.title(f"Error (link-side)")
             plt.grid()
+            plt.legend()
+            
+            plt.subplot(2,3,2)
+            plt.plot(torch.stack(q_list[i]).T[0,:], label="q1")
+            plt.plot(torch.stack(q_list[i]).T[1,:], label="q2")
+            plt.plot(r_list[0,:], label="ref1", linestyle='--')
+            plt.plot(r_list[1,:], label="ref2", linestyle='--')
+            plt.xlabel("Time steps")
+            plt.ylabel("Angle [rad]")
+            plt.title(f"Link-side positions")
+            plt.grid()
+            plt.legend()
+            
+            plt.subplot(2,3,3)
+            plt.plot(torch.stack(theta_list[i]).T[0,:], label="theta1")
+            plt.plot(torch.stack(theta_list[i]).T[1,:], label="theta2")
+            plt.plot(r_list[0,:], label="ref1", linestyle='--')
+            plt.plot(r_list[1,:], label="ref2", linestyle='--')
+            plt.xlabel("Time steps")
+            plt.ylabel("Angle [rad]")
+            plt.title(f"Motor-side positions (theta)")
+            plt.grid()
+            plt.legend()
+            
+            plt.subplot(2,3,4)
+            diff_theta_q1 = torch.stack(theta_list[i]).T[0,:] - torch.stack(q_list[i]).T[0,:]
+            diff_theta_q2 = torch.stack(theta_list[i]).T[1,:] - torch.stack(q_list[i]).T[1,:]
+            plt.plot(diff_theta_q1, label="theta1 - q1")
+            plt.plot(diff_theta_q2, label="theta2 - q2")
+            plt.xlabel("Time steps")
+            plt.ylabel("Deflection [rad]")
+            plt.title(f"SEA deflection (theta - q)")
+            plt.grid()
+            plt.legend()
+            
+            plt.subplot(2,3,5)
+            plt.plot(torch.stack(dq_list[i]).T[0,:], label="dq1")
+            plt.plot(torch.stack(dq_list[i]).T[1,:], label="dq2")
+            plt.xlabel("Time steps")
+            plt.ylabel("Velocity [rad/s]")
+            plt.title(f"Link-side velocity")
+            plt.grid()
+            plt.legend()
+            
+            plt.subplot(2,3,6)
+            plt.plot(torch.stack(dtheta_list[i]).T[0,:], label="dtheta1")
+            plt.plot(torch.stack(dtheta_list[i]).T[1,:], label="dtheta2")
+            plt.xlabel("Time steps")
+            plt.ylabel("Velocity [rad/s]")
+            plt.title(f"Motor-side velocity")
+            plt.grid()
+            plt.legend()
+            
+            plt.suptitle(f"SEA Model - Episode {i+1}")
+            plt.tight_layout()
+    
         plt.show()
     else:
-        print("Plots generated (in memory), but not shown since PLOT = False.")
+        print("Plots generated but not shown.")
     
     if visual:
         mujoco_renderer.close()
-    

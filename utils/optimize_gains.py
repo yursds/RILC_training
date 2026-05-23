@@ -22,7 +22,7 @@ from stable_baselines3 import PPO
 abs_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'classes')
 URDF_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MESH_DIR = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/meshes')
-MJC_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/mjc/leg_constrained_elastic.xml')
+MJC_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/mjc/scene_elastic.xml')
 
 parent_str = "model"
 dat_str = "rilc_constrained"
@@ -58,7 +58,8 @@ def run_simulation(
     n_episodes: int = 50,
     scaling: int = 2,
     f_robot: int = 100,
-    qi_init: torch.Tensor = None, qf: torch.Tensor = None,
+    qi_init: torch.Tensor = None, 
+    qf: torch.Tensor = None,
     verbose: bool = False
 ) -> tuple[float, list[float]]:
 
@@ -290,14 +291,14 @@ def run_simulation(
 
 
 def objective_function(x: np.ndarray, taskT: float, n_episodes: int, scaling: int, f_robot: int, qi: torch.Tensor, qf: torch.Tensor) -> float:
-    kp, kv, le, lde, ldde = x
-    
-    if kp < 0 or kp > 5 or kv < 0 or kv > 5 or le < 0 or le > 0.1 or lde < 0 or lde > 0.1 or ldde < 0 or ldde > 0.1:
+    kp, kv, le, lde, ldde, lddde = x
+
+    if kp < 0 or kp > 5 or kv < 0 or kv > 5 or le < 0 or le > 0.1 or lde < 0 or lde > 0.1 or ldde < 0 or ldde > 0.1 or lddde < 0 or lddde > 0.1:
         return 10.0
-    
+
     try:
         rmse, _ = run_simulation(
-            kp=kp, kv=kv, le=le, lde=lde, ldde=ldde,
+            kp=kp, kv=kv, le=le, lde=lde, ldde=ldde, lddde=lddde,
             taskT=taskT, n_episodes=n_episodes,
             scaling=scaling, f_robot=f_robot,
             qi_init=qi, qf=qf,
@@ -329,25 +330,25 @@ def grid_search_optimization(
     count = 0
     
     start_time = time.time()
-    
+
     for le in le_vals:
         for lde in lde_vals:
             for ldde in ldde_vals:
                 count += 1
                 rmse, _ = run_simulation(
-                    kp=0.4, kv=0.25, le=le, lde=lde, ldde=ldde,
+                    kp=0.4, kv=0.25, le=le, lde=lde, ldde=ldde, lddde=1e-07,
                     taskT=taskT, n_episodes=n_episodes,
                     scaling=scaling, f_robot=f_robot,
                     qi_init=qi, qf=qf, verbose=False
                 )
-                
+
                 results.append({'le': le, 'lde': lde, 'ldde': ldde, 'rmse': rmse})
-                
+
                 if rmse < best_rmse:
                     best_rmse = rmse
                     best_params = {'kp': 0.4, 'kv': 0.25, 'le': le, 'lde': lde, 'ldde': ldde}
                     print(f"  [{count}/{total_combos}] New best: RMSE={rmse:.6f}")
-    
+
     elapsed = time.time() - start_time
     
     print(f"\nGrid Search completed in {elapsed:.1f}s")
@@ -365,16 +366,17 @@ def main():
     args = parser.parse_args()
     
     taskT = 1.0
-    n_episodes = 30
+    n_episodes = 15
     scaling = 2
     f_robot = 100
     le = 2e-05
     lde = 4e-05
     ldde = 1e-06
+    lddde = 1e-07
     kp = 0.4
     kv = 0.25
-    
-    baseline_gains = {'kp': kp, 'kv': kv, 'le': le, 'lde': lde, 'ldde': ldde}
+
+    baseline_gains = {'kp': kp, 'kv': kv, 'le': le, 'lde': lde, 'ldde': ldde, 'lddde': lddde}
     
     print("="*60)
     print("RILC-SEA GAIN OPTIMIZATION")
@@ -421,11 +423,12 @@ def main():
         print("="*60)
         
         bounds = [
-            (0.4, 0.4),
-            (0.25, 0.25),
-            (0.001, 0.01),
-            (0.00001, 0.0001),
-            (0.0001, 0.001),
+            (0.0, 1.0),
+            (0.0, 1.0),
+            (1e-06, 5e-05),
+            (1e-06, 5e-05),
+            (1e-07, 5e-06),
+            (1e-08, 5e-07),
         ]
         
         print("\nSearch bounds:")
@@ -440,7 +443,7 @@ def main():
             obj_func,
             bounds,
             maxiter=args.max_iter,
-            popsize=10,
+            popsize=5,
             tol=1e-6,
             mutation=(0.5, 1.0),
             recombination=0.7,
@@ -456,7 +459,8 @@ def main():
             'kv': result.x[1],
             'le': result.x[2],
             'lde': result.x[3],
-            'ldde': result.x[4]
+            'ldde': result.x[4],
+            'lddde': result.x[5]
         }
         
         print(f"\nDE Best RMSE: {de_rmse:.6f}")

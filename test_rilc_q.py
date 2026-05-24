@@ -15,7 +15,8 @@ from classes.environments.env_rlilc_elastic import Env_RILC as ENV
 import functools
 
 
-abs_path  = os.path.join(os.path.dirname((os.path.abspath(__file__))),'classes') # classes_folder
+_HERE = os.path.dirname(os.path.abspath(__file__))
+abs_path = os.path.join(_HERE, 'classes')
 URDF_PATH = os.path.join(abs_path,'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MESH_DIR  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/meshes')
 MJC_PATH  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/mjc/scene_elastic.xml')
@@ -27,40 +28,13 @@ step_str = "best_model/best_model.zip"
 print(dat_str)
 model_str = parent_str + "/" + dat_str + "/" + step_str
 
-QF = torch.tensor([[torch.pi/3], [torch.pi/3]])
-# QF = torch.tensor([[-2.232461929321289], [-3.069495677947998]])
-QF = torch.tensor([[2.4], [-1.4]])
-# QF = torch.tensor([[0.75], [0.75]])
+QF = torch.tensor([[2.0], [-1.0]])
 FL_ILC = True
 FL_RL = True
 OBS_ILC = True
 PLOT = True
 
 if FL_ILC: OBS_ILC = True
-TRAJ = "minjerk"
-
-
-def custom_lissajous_at(t:float, complete_traj: torch.Tensor, dt:float) -> list[torch.Tensor, torch.Tensor, torch.Tensor]:
-
-    idx = int(t // dt)
-    if idx >= complete_traj.shape[1]:
-        idx = complete_traj.shape[1] - 1
-        print("Warning: index out of bounds in custom_lissajous_at")    
-    des_traj = complete_traj[:, idx]
-
-    q_des   = des_traj[0:2].view(2,1)
-    dq_des  = des_traj[2:4].view(2,1)
-    ddq_des = des_traj[4:6].view(2,1)
-    
-    return q_des, dq_des, ddq_des
-
-def load_trajectory(filename: str = 'complete_traj.pt') -> torch.Tensor:
-
-    if os.path.exists(filename):
-        complete_traj = torch.load(filename, weights_only=True)
-        # print(f"Trajectory loaded from {filename}")
-    return complete_traj
-
 def minjerk(qi:torch.Tensor,qf:torch.Tensor,duration:float,t:float) -> list[torch.Tensor,torch.Tensor,torch.Tensor]:
 
     delta_q = qi-qf
@@ -150,18 +124,7 @@ if __name__ == '__main__':
     e_old_ep_ts = torch.zeros(njoint,1,samples)
     de_old_ep_ts = torch.zeros(njoint,1,samples)
     
-    # +++++++++++++++++ init traj ++++++++++++++++++++++++++++
-
-    if TRAJ == "minjerk":
-        des_traj_at = functools.partial(minjerk, qi = torch.tensor([[0.0], [0.0]]), qf = QF, duration = taskT)
-    elif TRAJ == "lissajous":
-        traj = load_trajectory(filename=os.path.join(abs_path, "references", "traj.pt"))
-        des_traj_at = functools.partial(custom_lissajous_at, complete_traj=traj, dt=dt_rob)
-    elif TRAJ == "circle":
-        traj = load_trajectory(filename=os.path.join(abs_path, "references", "traj_circle.pt"))
-        des_traj_at = functools.partial(custom_lissajous_at, complete_traj=traj, dt=dt_rob)
-    else:
-        assert False, "No valid trajectory selected"
+    des_traj_at = functools.partial(minjerk, qi=torch.tensor([[0.0], [0.0]]), qf=QF, duration=taskT)
         
     # +++++++++++++++++++ load pin ++++++++++++++++++++++++++++
     

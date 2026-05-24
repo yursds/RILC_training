@@ -17,7 +17,8 @@ from classes.environments.env_rlilc_mjc import Env_RILC as ENV
 from gymnasium.envs.mujoco.mujoco_rendering import MujocoRenderer
 
 # Configuration constants
-abs_path = os.path.join(os.path.dirname((os.path.abspath(__file__))), 'classes')
+_HERE = os.path.dirname(os.path.abspath(__file__))
+abs_path = os.path.join(_HERE, 'classes')
 URDF_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/urdf/leg_constrained.urdf')
 MESH_DIR  = os.path.join(abs_path,'robots/robot_models/softleg_urdf/meshes')
 MJC_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/mjc/scene_test.xml')
@@ -25,9 +26,7 @@ MJC_PATH = os.path.join(abs_path, 'robots/robot_models/softleg_urdf/mjc/scene_te
 parent_str = "model"
 dat_str = "rilc_constrained"
 
-# Trajectory parameters
-QF = torch.tensor([[2.4], [-1.4]])
-TRAJ = "minjerk"
+QF = torch.tensor([[2.0], [-1.0]])
 PLOT = True
 
 # Helper for MinJerk
@@ -231,8 +230,7 @@ if __name__ == '__main__':
     # Robot
     robot = Sim_RR(urdf_path=URDF_PATH, mesh_dir=MESH_DIR, ee_name='LH_ANKLE')
     
-    if TRAJ == "minjerk":
-        des_traj_at = functools.partial(minjerk, qi = torch.tensor([[0.0], [0.0]]), qf = QF, duration = taskT)
+    des_traj_at = functools.partial(minjerk, qi=torch.tensor([[0.0], [0.0]]), qf=QF, duration=taskT)
     
     # Logging Lists
     e_list = []
@@ -413,14 +411,12 @@ if __name__ == '__main__':
     if visual:
         mujoco_renderer.close()
 
-    # ---- PLOTTING (Matched to test_rilc.py) ----
-    
-    # 1. Console print
+    rmse_hist = []
     for i in range(len(e_list)):
-        rmse_list = torch.sqrt(torch.mean(torch.stack(e_list[i])**2))
-        print(f"rilc MSE of episode: {i}", rmse_list)
+        rmse_i = torch.sqrt(torch.mean(torch.stack(e_list[i])**2))
+        rmse_hist.append(rmse_i.item())
+        print(f"noilc MSE of episode: {i}", rmse_i)
         
-    # 2. Detailed Plot First and Last Episode
     for i in [0, n_ep_reset-1]:
         plt.figure(figsize=(8, 8))
         plt.subplot(2,2,1)
@@ -458,13 +454,9 @@ if __name__ == '__main__':
         plt.grid()
         plt.legend()
 
-        plt.suptitle(f"ILC in  episode {i+1}")
+        plt.suptitle(f"NOILC episode {i+1}")
         plt.tight_layout()
-        if PLOT:
-            plt.savefig(f"noilc_detailed_ep_{i}.png")
-            plt.show()
 
-    # 3. Control Components Plot
     for i in [0, n_ep_reset-1]:
         plt.figure(figsize=(15, 3))
         
@@ -505,13 +497,20 @@ if __name__ == '__main__':
         plt.title("uRL")
         plt.grid()
         
-        plt.suptitle(f"ILC Episode {i+1}")
+        plt.suptitle(f"NOILC Episode {i+1}")
         plt.tight_layout()
-        if PLOT:
-            plt.savefig(f"noilc_controls_ep_{i}.png")
-            plt.show()
         
+    plt.figure(figsize=(6, 4))
+    plt.plot(range(n_ep_reset), rmse_hist, "o-", lw=2, label="NOILC")
+    plt.xlabel("Episode $j$")
+    plt.ylabel("RMSE [rad]")
+    plt.title("NOILC — RMSE progression")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+
     if PLOT:
+        plt.show()
         print("All plots saved and shown.")
     else:
         print("Plots generated (in memory), but not shown/saved since PLOT = False.")

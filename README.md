@@ -48,8 +48,9 @@ Further information can be found in the respective folders.
 
 4. Test policies:
 
-   Once trained, you can evaluate the policies using the testing scripts:
+   You can evaluate the contollers using the testing scripts:
    ```bash
    uv run test_rilc.py
    uv run test_noilc.py
+   uv run test_cilc.py
    ```

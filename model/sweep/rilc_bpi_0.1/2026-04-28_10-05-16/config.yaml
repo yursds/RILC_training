@@ -1,0 +1,25 @@
+b_pi: 0.1
+chunks: 16
+env_id: Env_RILC_RANGE
+f_robot: 100
+info: ' self.q_range_task = torch.tensor(torch.pi/3) rand_number = torch.rand(2,1)*2-1
+  self.delta_q_task = torch.tensor([[torch.pi/2],[0]]) self.qf = self.q_range_task*rand_number
+  + self.delta_q_task for traj with minjerk'
+kp: 0.4
+kv: 0.25
+ldde: 0.0
+lde: 0.0004
+le: 0.0002
+n_envs: 8
+n_ep_reset: 5
+n_update: 200
+pi:
+- 64
+- 64
+scaling: 2
+seed: 42
+stayT: 0.0
+taskT: 1.0
+vf:
+- 64
+- 64
